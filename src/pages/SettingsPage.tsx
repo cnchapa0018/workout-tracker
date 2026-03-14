@@ -1,11 +1,14 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Save, Loader2, User as UserIcon, Scale, Target, Wrench, TrendingDown, Bell, RotateCcw } from 'lucide-react';
+import { LogOut, Save, Loader2, User as UserIcon, Scale, Target, Wrench, TrendingDown, Bell, RotateCcw, Sun, Moon, Monitor, FileDown } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../lib/supabase';
 import { BodyweightLog } from '../components/BodyweightLog';
 import { useNotifications } from '../hooks/useNotifications';
-import type { TrainingMode } from '../types/database';
+import { downloadPlanPdf } from '../lib/planPdfGenerator';
+import { calculateNutrition, type OnboardingAnswers } from '../lib/programGenerator';
+import type { TrainingMode, ActivityLevel, MealsPerDay, EatingApproach } from '../types/database';
 
 const EQUIPMENT_OPTIONS = ['barbell', 'dumbbell', 'cable', 'machine', 'smith_machine', 'bodyweight', 'ez_bar', 'bands'] as const;
 const MODE_LABELS: Record<TrainingMode, string> = {
@@ -16,6 +19,7 @@ const MODE_LABELS: Record<TrainingMode, string> = {
 
 export default function SettingsPage() {
   const { user, profile, signOut, refreshProfile } = useAuth();
+  const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
 
   const [displayName, setDisplayName] = useState(profile?.display_name ?? '');
@@ -40,16 +44,19 @@ export default function SettingsPage() {
     const w = parseFloat(currentWeight);
     if (!w || w <= 0) return;
     const t = parseFloat(targetWeight) || w;
-    const pMin = Math.round((w * 0.82) / 5) * 5;
-    const pMax = Math.round(w / 5) * 5;
-    const diff = t - w;
-    const calsPerLb = diff < -5 ? 13 : diff > 5 ? 17 : 15;
-    const cals = Math.round((w * calsPerLb) / 50) * 50;
-    setProteinMin(String(pMin));
-    setProteinMax(String(pMax));
-    setCalorieTarget(String(cals));
+    const sex = (profile?.sex as 'male' | 'female' | 'prefer_not_to_say') ?? 'male';
+    const result = calculateNutrition(
+      w, t, sex,
+      profile?.age ?? null,
+      profile?.height_inches ?? null,
+      profile?.activity_level ?? 'moderately_active',
+      profile?.primary_goal ?? 'build_muscle',
+    );
+    setProteinMin(String(result.proteinMin));
+    setProteinMax(String(result.proteinMax));
+    setCalorieTarget(String(result.calorieTarget));
     setSaved(false);
-  }, [currentWeight, targetWeight]);
+  }, [currentWeight, targetWeight, profile?.sex, profile?.age, profile?.height_inches, profile?.activity_level, profile?.primary_goal]);
 
   const toggleEquipment = useCallback((item: string) => {
     setEquipment((prev) =>
@@ -84,6 +91,36 @@ export default function SettingsPage() {
   return (
     <div className="p-4 pb-24 space-y-6">
       <h1 className="text-2xl font-bold text-foreground">Settings</h1>
+
+      {/* Appearance */}
+      <section className="space-y-3">
+        <div className="flex items-center gap-2 text-muted">
+          <Sun size={16} />
+          <h2 className="text-sm font-medium">APPEARANCE</h2>
+        </div>
+        <div className="bg-surface-2 rounded-xl p-4">
+          <div className="flex gap-2">
+            {([
+              { value: 'light' as const, label: 'Light', Icon: Sun },
+              { value: 'dark' as const, label: 'Dark', Icon: Moon },
+              { value: 'system' as const, label: 'System', Icon: Monitor },
+            ]).map(({ value, label, Icon }) => (
+              <button
+                key={value}
+                onClick={() => setTheme(value)}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 min-h-11 rounded-lg text-sm font-medium transition-colors ${
+                  theme === value
+                    ? 'bg-brand/15 text-brand border border-brand/30'
+                    : 'bg-surface-3 text-muted border border-border-2'
+                }`}
+              >
+                <Icon size={16} />
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* Profile section */}
       <section className="space-y-3">
@@ -277,6 +314,46 @@ export default function SettingsPage() {
       >
         {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
         {saved ? 'Saved!' : 'Save Changes'}
+      </button>
+
+      {/* Download Plan PDF */}
+      <button
+        onClick={() => {
+          if (!profile) return;
+          const answers: OnboardingAnswers = {
+            displayName: profile.display_name ?? '',
+            sex: (profile.sex as 'male' | 'female' | 'prefer_not_to_say') ?? 'male',
+            heightInches: profile.height_inches,
+            currentWeight: profile.current_weight,
+            targetWeight: profile.target_weight,
+            age: profile.age ?? null,
+            activityLevel: (profile.activity_level as ActivityLevel) ?? 'moderately_active',
+            experience: profile.experience_level ?? 'intermediate',
+            primaryGoal: profile.primary_goal ?? 'build_muscle',
+            trainingDaysPerWeek: (profile.training_days_per_week ?? 4) as 3 | 4 | 5 | 6,
+            preferredDays: profile.preferred_days ?? [],
+            sessionDuration: profile.session_duration ?? '60-75',
+            equipmentAvailable: profile.equipment_available,
+            trainingLocation: profile.training_location ?? 'gym',
+            injuries: profile.injuries ?? [],
+            avoidedExercises: profile.avoided_exercises ?? [],
+            tracksMacros: profile.tracks_macros,
+            takesCreatine: profile.takes_creatine,
+            mealsPerDay: (profile.meals_per_day as MealsPerDay) ?? '4',
+            eatingApproach: (profile.eating_approach as EatingApproach) ?? 'no_preference',
+            emphasisAreas: profile.emphasis_areas ?? [],
+            averageDailySteps: profile.average_daily_steps ?? null,
+            progressTrackingMethods: profile.progress_tracking_methods ?? [],
+            detrainedDuration: profile.detrained_duration ?? undefined,
+            previousTrainingStyle: profile.previous_training_style ?? undefined,
+            showFormExplanations: profile.show_form_explanations ?? 'all',
+          };
+          downloadPlanPdf(answers, profile.display_name);
+        }}
+        className="w-full bg-surface-2 hover:bg-surface-3 text-brand font-medium rounded-xl py-3 min-h-11 transition-colors flex items-center justify-center gap-2"
+      >
+        <FileDown size={18} />
+        Download My Plan (PDF)
       </button>
 
       {/* Redo Onboarding */}

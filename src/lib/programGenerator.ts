@@ -4,6 +4,9 @@ import type {
   SessionDuration,
   SplitType,
   FormExplanationLevel,
+  ActivityLevel,
+  MealsPerDay,
+  EatingApproach,
 } from '../types/database';
 
 // ─── Onboarding Profile (raw questionnaire answers) ────────────────────────────
@@ -14,6 +17,8 @@ export interface OnboardingAnswers {
   heightInches: number | null;
   currentWeight: number | null;
   targetWeight: number | null;
+  age: number | null;
+  activityLevel: ActivityLevel;
   experience: ExperienceLevel;
   primaryGoal: PrimaryGoal;
   trainingDaysPerWeek: 3 | 4 | 5 | 6;
@@ -25,6 +30,11 @@ export interface OnboardingAnswers {
   avoidedExercises: string[];
   tracksMacros: boolean;
   takesCreatine: boolean;
+  mealsPerDay: MealsPerDay;
+  eatingApproach: EatingApproach;
+  emphasisAreas: string[];
+  averageDailySteps: number | null;
+  progressTrackingMethods: string[];
   detrainedDuration?: string;
   previousTrainingStyle?: string;
   showFormExplanations: FormExplanationLevel;
@@ -51,6 +61,12 @@ export interface DerivedTrainingParams {
   proteinTargetMin: number;
   proteinTargetMax: number;
   calorieTarget: number;
+  fatTarget: number;
+  carbTarget: number;
+  bmr: number;
+  tdee: number;
+  bmi: number | null;
+  estimatedWeeksToGoal: number | null;
   cardioSessionsPerWeek: number;
   showTooltips: boolean;
   showFormExplanations: FormExplanationLevel;
@@ -68,29 +84,126 @@ export function resolveSplitType(days: 3 | 4 | 5 | 6): SplitType {
   }
 }
 
-// ─── Nutrition Calculation ─────────────────────────────────────────────────────
+// ─── Activity Multipliers (Mifflin-St Jeor TDEE) ──────────────────────────────
+
+const ACTIVITY_MULTIPLIERS: Record<string, number> = {
+  sedentary: 1.2,
+  lightly_active: 1.375,
+  moderately_active: 1.55,
+  very_active: 1.725,
+  extremely_active: 1.9,
+};
+
+// ─── BMI Calculation ───────────────────────────────────────────────────────────
+
+export function calculateBMI(
+  weightLbs: number | null,
+  heightInches: number | null,
+): number | null {
+  if (!weightLbs || !heightInches || heightInches <= 0) return null;
+  // BMI = (weight in lbs × 703) / (height in inches)²
+  return Math.round((weightLbs * 703) / (heightInches * heightInches) * 10) / 10;
+}
+
+// ─── Timeline Estimation ───────────────────────────────────────────────────────
+
+export function estimateWeeksToGoal(
+  currentWeight: number | null,
+  targetWeight: number | null,
+  goal: PrimaryGoal,
+): number | null {
+  if (!currentWeight || !targetWeight) return null;
+  const diff = Math.abs(targetWeight - currentWeight);
+  if (diff < 1) return null; // effectively at goal
+  // Safe rate: ~1 lb/week fat loss, ~0.5 lb/week muscle gain
+  const ratePerWeek = goal === 'lose_fat' ? 1.0 : goal === 'build_muscle' ? 0.5 : 0.75;
+  return Math.ceil(diff / ratePerWeek);
+}
+
+// ─── Scientific Nutrition Calculation (Mifflin-St Jeor) ────────────────────────
+
+export interface NutritionResult {
+  bmr: number;
+  tdee: number;
+  calorieTarget: number;
+  proteinMin: number;
+  proteinMax: number;
+  fatTarget: number;
+  carbTarget: number;
+}
 
 export function calculateNutrition(
   currentWeight: number | null,
-  targetWeight: number | null,
+  _targetWeight: number | null,
   sex: 'male' | 'female' | 'prefer_not_to_say',
-): { proteinMin: number; proteinMax: number; calorieTarget: number } {
+  age?: number | null,
+  heightInches?: number | null,
+  activityLevel?: string | null,
+  primaryGoal?: PrimaryGoal | null,
+): NutritionResult {
   const w = currentWeight ?? 170;
-  const t = targetWeight ?? w;
+  const userAge = age ?? 30;
+  const heightIn = heightInches ?? 68;
 
-  // Protein: 0.82–1.0 g/lb, rounded to nearest 5
-  const proteinMultiplierLow = sex === 'female' ? 0.75 : 0.82;
-  const proteinMultiplierHigh = sex === 'female' ? 0.9 : 1.0;
+  // Convert to metric for Mifflin-St Jeor
+  const weightKg = w * 0.453592;
+  const heightCm = heightIn * 2.54;
+
+  // Mifflin-St Jeor BMR
+  // Male:   10 × weight(kg) + 6.25 × height(cm) − 5 × age + 5
+  // Female: 10 × weight(kg) + 6.25 × height(cm) − 5 × age − 161
+  const isFemale = sex === 'female';
+  const bmr = Math.round(
+    10 * weightKg + 6.25 * heightCm - 5 * userAge + (isFemale ? -161 : 5)
+  );
+
+  // TDEE = BMR × activity multiplier
+  const multiplier = ACTIVITY_MULTIPLIERS[activityLevel ?? 'moderately_active'] ?? 1.55;
+  const tdee = Math.round(bmr * multiplier);
+
+  // Target calories based on goal
+  let calorieTarget: number;
+  const goal = primaryGoal ?? 'build_muscle';
+  switch (goal) {
+    case 'lose_fat':
+      calorieTarget = Math.round(tdee * 0.80); // 20% deficit
+      break;
+    case 'build_muscle':
+      calorieTarget = Math.round(tdee * 1.10); // 10% surplus
+      break;
+    case 'recomp':
+      calorieTarget = tdee; // maintenance
+      break;
+    case 'get_stronger':
+      calorieTarget = Math.round(tdee * 1.10); // slight surplus
+      break;
+    case 'general_fitness':
+    default:
+      calorieTarget = tdee;
+      break;
+  }
+  // Round to nearest 50
+  calorieTarget = Math.round(calorieTarget / 50) * 50;
+
+  // Protein: 0.8–1.0 g/lb bodyweight (higher range for cuts)
+  const proteinMultiplierLow = isFemale ? 0.75 : 0.82;
+  const proteinMultiplierHigh = isFemale ? 0.9 : 1.0;
   const proteinMin = Math.round((w * proteinMultiplierLow) / 5) * 5;
   const proteinMax = Math.round((w * proteinMultiplierHigh) / 5) * 5;
 
-  // Calories: based on weight delta
-  const diff = t - w;
-  const baseMult = sex === 'female' ? 12 : 14;
-  const calsPerLb = diff < -5 ? baseMult - 1 : diff > 5 ? baseMult + 3 : baseMult + 1;
-  const calorieTarget = Math.round((w * calsPerLb) / 50) * 50;
+  // Use midpoint for macro math
+  const proteinGrams = Math.round((proteinMin + proteinMax) / 2);
 
-  return { proteinMin, proteinMax, calorieTarget };
+  // Fat: 25% of total calories (minimum for hormone health)
+  const fatCalories = Math.round(calorieTarget * 0.25);
+  const fatTarget = Math.round(fatCalories / 9);
+
+  // Carbs: remaining calories
+  const proteinCalories = proteinGrams * 4;
+  const carbCalories = Math.max(0, calorieTarget - proteinCalories - fatCalories);
+  const carbTarget = Math.round(carbCalories / 4);
+
+  return { bmr, tdee, calorieTarget, proteinMin, proteinMax, fatTarget, carbTarget };
 }
 
 // ─── Parameter Derivation ──────────────────────────────────────────────────────
@@ -169,7 +282,19 @@ export function deriveTrainingParams(answers: OnboardingAnswers): DerivedTrainin
   }
 
   // ── Nutrition ─────────────────────────────────────────────────────────
-  const nutrition = calculateNutrition(answers.currentWeight, answers.targetWeight, sex);
+  const nutrition = calculateNutrition(
+    answers.currentWeight,
+    answers.targetWeight,
+    sex,
+    answers.age,
+    answers.heightInches,
+    answers.activityLevel,
+    answers.primaryGoal,
+  );
+
+  // ── BMI & Timeline ────────────────────────────────────────────────────
+  const bmi = calculateBMI(answers.currentWeight, answers.heightInches);
+  const estimatedWeeks = estimateWeeksToGoal(answers.currentWeight, answers.targetWeight, answers.primaryGoal);
 
   // ── Cardio ────────────────────────────────────────────────────────────
   let cardioSessionsPerWeek = 2;
@@ -205,6 +330,12 @@ export function deriveTrainingParams(answers: OnboardingAnswers): DerivedTrainin
     proteinTargetMin: nutrition.proteinMin,
     proteinTargetMax: nutrition.proteinMax,
     calorieTarget: nutrition.calorieTarget,
+    fatTarget: nutrition.fatTarget,
+    carbTarget: nutrition.carbTarget,
+    bmr: nutrition.bmr,
+    tdee: nutrition.tdee,
+    bmi,
+    estimatedWeeksToGoal: estimatedWeeks,
     cardioSessionsPerWeek,
     showTooltips,
     showFormExplanations: answers.showFormExplanations,

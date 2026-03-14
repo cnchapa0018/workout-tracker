@@ -35,7 +35,7 @@ railway up               # Deploy to Railway
 - TypeScript strict mode. No `any` types. Use generated `database.ts` types from Supabase.
 - Tailwind for all styling. No CSS files. No inline style objects.
 - Minimum 44px touch targets on all interactive elements.
-- Dark mode only (no light mode toggle needed).
+- Support both light and dark mode. Use semantic color tokens (`bg-bg`, `text-foreground`, `bg-surface`, etc.) — never hardcode hex colors. Default to system preference, with a user toggle in Settings.
 
 ## File Conventions
 - Components: `src/components/ComponentName.tsx` (PascalCase)
@@ -45,7 +45,7 @@ railway up               # Deploy to Railway
 - Migrations: `supabase/migrations/YYYYMMDDHHmmss_description.sql`
 
 ## Do NOT
-- Use localStorage or sessionStorage. All persistent data goes to Supabase.
+- Use localStorage or sessionStorage for user data. All persistent data goes to Supabase. (Exception: theme preference may use localStorage for flash-free initial load.)
 - Create separate CSS/SCSS files. Use Tailwind.
 - Import Supabase service key in frontend code.
 - Write raw SQL in React components. Use Supabase client SDK methods.
