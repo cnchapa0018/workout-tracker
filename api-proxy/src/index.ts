@@ -31,6 +31,10 @@ app.use('/api/food', foodRouter);
 app.use('/api/exercises', exercisesRouter);
 app.use('/api/youtube', youtubeRouter);
 
+app.get('/', (_req, res) => {
+  res.json({ status: 'ok', service: 'api-proxy', timestamp: new Date().toISOString() });
+});
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
