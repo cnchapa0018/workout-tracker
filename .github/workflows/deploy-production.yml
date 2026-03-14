@@ -52,9 +52,9 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy frontend to production
-        run: railway up --service frontend
+        run: railway up --service workout-tracker
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PRODUCTION_TOKEN }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
   deploy-api-proxy:
     runs-on: ubuntu-latest
@@ -79,4 +79,4 @@ jobs:
       - name: Deploy api-proxy to production
         run: railway up --service api-proxy
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PRODUCTION_TOKEN }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
