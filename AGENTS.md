@@ -14,7 +14,7 @@ This is a hypertrophy-focused workout PWA for experienced lifters. It includes:
 - Exercise swaps must stay within the same movement pool.
 - Block rotation changes 2-4 exercises, not all. Anchor lifts persist.
 - Protein target (170-190g) is the hero metric in nutrition UI.
-- All touch targets minimum 44px. Mobile-first, dark mode only.
+- All touch targets minimum 44px. Mobile-first. Support both light and dark mode (system default + user toggle).
 - Run `npx supabase gen types typescript` after any migration change.
 
 ## Agent Routing

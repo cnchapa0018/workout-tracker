@@ -3,23 +3,25 @@ import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
 import {
   deriveTrainingParams,
-  calculateNutrition,
+  calculateBMI,
+  estimateWeeksToGoal,
   generateProgramPreview,
   type OnboardingAnswers,
 } from '../../lib/programGenerator';
-import type { ExperienceLevel, PrimaryGoal, SessionDuration, FormExplanationLevel } from '../../types/database';
+import type { ExperienceLevel, PrimaryGoal, SessionDuration, FormExplanationLevel, ActivityLevel, MealsPerDay, EatingApproach } from '../../types/database';
 import {
   ChevronRight,
   ChevronLeft,
   Loader2,
   Dumbbell,
-  Heart,
   AlertTriangle,
   Check,
   Sparkles,
+  Flame,
+  Activity,
 } from 'lucide-react';
 
-const TOTAL_STEPS = 10;
+const TOTAL_STEPS = 13;
 
 const EQUIPMENT_OPTIONS = [
   { value: 'barbell', label: 'Barbell + Rack' },
@@ -130,6 +132,9 @@ export default function OnboardingFlow() {
   const [heightIn, setHeightIn] = useState('');
   const [currentWeight, setCurrentWeight] = useState('');
   const [targetWeight, setTargetWeight] = useState('');
+  const [age, setAge] = useState('');
+  const [activityLevel, setActivityLevel] = useState<ActivityLevel>('moderately_active');
+  const [averageDailySteps, setAverageDailySteps] = useState('');
   const [experience, setExperience] = useState<ExperienceLevel | null>(null);
   const [primaryGoal, setPrimaryGoal] = useState<PrimaryGoal | null>(null);
   const [trainingDays, setTrainingDays] = useState<3 | 4 | 5 | 6>(4);
@@ -141,6 +146,10 @@ export default function OnboardingFlow() {
   const [avoidedExercises, setAvoidedExercises] = useState('');
   const [tracksMacros, setTracksMacros] = useState(true);
   const [takesCreatine, setTakesCreatine] = useState(false);
+  const [mealsPerDay, setMealsPerDay] = useState<MealsPerDay>('4');
+  const [eatingApproach, setEatingApproach] = useState<EatingApproach>('no_preference');
+  const [emphasisAreas, setEmphasisAreas] = useState<string[]>([]);
+  const [progressTrackingMethods, setProgressTrackingMethods] = useState<string[]>(['scale']);
   const [detrainedDuration, setDetrainedDuration] = useState('');
   const [previousTrainingStyle, setPreviousTrainingStyle] = useState('');
   const [showFormExplanations, setShowFormExplanations] = useState<FormExplanationLevel>('all');
@@ -148,7 +157,10 @@ export default function OnboardingFlow() {
   const totalHeightInches = (parseInt(heightFt) || 0) * 12 + (parseInt(heightIn) || 0);
   const cw = parseFloat(currentWeight) || null;
   const tw = parseFloat(targetWeight) || null;
-  const nutrition = calculateNutrition(cw, tw, sex);
+  const parsedAge = parseInt(age) || null;
+  const parsedSteps = parseInt(averageDailySteps) || null;
+  const bmi = calculateBMI(cw, totalHeightInches || null);
+  const weeksToGoal = estimateWeeksToGoal(cw, tw, primaryGoal ?? 'build_muscle');
 
   const toggleArray = (arr: string[], val: string, setter: (v: string[]) => void) => {
     setter(arr.includes(val) ? arr.filter((v) => v !== val) : [...arr, val]);
@@ -163,6 +175,8 @@ export default function OnboardingFlow() {
     heightInches: totalHeightInches || null,
     currentWeight: cw,
     targetWeight: tw,
+    age: parsedAge,
+    activityLevel,
     experience: experience ?? 'intermediate',
     primaryGoal: primaryGoal ?? 'build_muscle',
     trainingDaysPerWeek: trainingDays,
@@ -174,10 +188,15 @@ export default function OnboardingFlow() {
     avoidedExercises: avoidedExercises.split(',').map((s) => s.trim()).filter(Boolean),
     tracksMacros,
     takesCreatine,
+    mealsPerDay,
+    eatingApproach,
+    emphasisAreas,
+    averageDailySteps: parsedSteps,
+    progressTrackingMethods,
     detrainedDuration: isDetrained ? detrainedDuration : undefined,
     previousTrainingStyle: isExperienced ? previousTrainingStyle : undefined,
     showFormExplanations,
-  }), [displayName, sex, totalHeightInches, cw, tw, experience, primaryGoal, trainingDays, preferredDays, sessionDuration, equipment, trainingLocation, injuries, avoidedExercises, tracksMacros, takesCreatine, detrainedDuration, previousTrainingStyle, showFormExplanations, isDetrained, isExperienced]);
+  }), [displayName, sex, totalHeightInches, cw, tw, parsedAge, activityLevel, experience, primaryGoal, trainingDays, preferredDays, sessionDuration, equipment, trainingLocation, injuries, avoidedExercises, tracksMacros, takesCreatine, mealsPerDay, eatingApproach, emphasisAreas, parsedSteps, progressTrackingMethods, detrainedDuration, previousTrainingStyle, showFormExplanations, isDetrained, isExperienced]);
 
   const params = experience && primaryGoal ? deriveTrainingParams(buildAnswers()) : null;
   const preview = params ? generateProgramPreview(params) : null;
@@ -195,6 +214,8 @@ export default function OnboardingFlow() {
       height_inches: answers.heightInches,
       current_weight: answers.currentWeight,
       target_weight: answers.targetWeight,
+      age: answers.age,
+      activity_level: answers.activityLevel,
       experience_level: answers.experience,
       primary_goal: answers.primaryGoal,
       training_days_per_week: answers.trainingDaysPerWeek,
@@ -206,6 +227,11 @@ export default function OnboardingFlow() {
       avoided_exercises: answers.avoidedExercises.length > 0 ? answers.avoidedExercises : null,
       tracks_macros: answers.tracksMacros,
       takes_creatine: answers.takesCreatine,
+      meals_per_day: answers.mealsPerDay,
+      eating_approach: answers.eatingApproach,
+      emphasis_areas: answers.emphasisAreas,
+      average_daily_steps: answers.averageDailySteps,
+      progress_tracking_methods: answers.progressTrackingMethods,
       detrained_duration: answers.detrainedDuration ?? null,
       previous_training_style: answers.previousTrainingStyle ?? null,
       show_tooltips: derived.showTooltips,
@@ -214,6 +240,10 @@ export default function OnboardingFlow() {
       protein_target_min: derived.proteinTargetMin,
       protein_target_max: derived.proteinTargetMax,
       calorie_target: derived.calorieTarget,
+      fat_target: derived.fatTarget,
+      carb_target: derived.carbTarget,
+      bmr: derived.bmr,
+      tdee: derived.tdee,
       compound_rep_min: derived.compoundRepMin,
       compound_rep_max: derived.compoundRepMax,
       starting_rir: derived.startingRir,
@@ -225,10 +255,25 @@ export default function OnboardingFlow() {
 
   const handleNext = useCallback(async () => {
     if (step > 0) await saveProgress();
-    setStep((s) => Math.min(s + 1, TOTAL_STEPS - 1));
-  }, [step, saveProgress]);
+    // For non-experienced users, skip from card 10 (form tips) to card 12 (summary)
+    if (step === 10 && !isExperienced) {
+      setStep(12);
+    } else {
+      setStep((s) => Math.min(s + 1, TOTAL_STEPS - 1));
+    }
+  }, [step, saveProgress, isExperienced]);
 
-  const handleBack = () => setStep((s) => Math.max(s - 1, 0));
+  const handleBack = () => {
+    // Mirror the skip: from card 12, go back to 10 for non-experienced users
+    if (step === 12 && !isExperienced) {
+      setStep(10);
+    } else {
+      setStep((s) => Math.max(s - 1, 0));
+    }
+  };
+
+  // The final step is always 12 (summary) regardless of experience
+  const isFinalStep = step === 12 || (step === 11 && isExperienced);
 
   const handleComplete = async () => {
     if (!user) return;
@@ -252,14 +297,17 @@ export default function OnboardingFlow() {
     switch (step) {
       case 0: return true; // welcome
       case 1: return true; // basic info (all optional except implicit)
-      case 2: return experience !== null;
-      case 3: return primaryGoal !== null;
-      case 4: return preferredDays.length >= trainingDays;
-      case 5: return equipment.length > 0;
-      case 6: return true; // injuries optional
-      case 7: return true; // nutrition optional
-      case 8: return true; // experience tuning
-      case 9: return true; // summary
+      case 2: return true; // activity & lifestyle
+      case 3: return experience !== null;
+      case 4: return primaryGoal !== null;
+      case 5: return preferredDays.length >= trainingDays;
+      case 6: return equipment.length > 0;
+      case 7: return true; // injuries optional
+      case 8: return true; // nutrition optional
+      case 9: return true; // emphasis & progress tracking
+      case 10: return true; // experience tuning
+      case 11: return true; // form tips (non-experienced)
+      case 12: return true; // summary
       default: return true;
     }
   })();
@@ -277,7 +325,7 @@ export default function OnboardingFlow() {
             <div>
               <h1 className="text-2xl font-bold text-foreground">Let&apos;s build your program</h1>
               <p className="text-muted mt-2 text-sm leading-relaxed">
-                This takes about 90 seconds. Your answers personalize
+                This takes about 2 minutes. Your answers personalize
                 everything — training, nutrition, recovery.
               </p>
             </div>
@@ -296,7 +344,7 @@ export default function OnboardingFlow() {
                 placeholder="What should we call you?"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-[44px] text-foreground placeholder-neutral-500 focus:outline-none focus:border-brand transition-colors"
+                className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-11 text-foreground placeholder-neutral-500 focus:outline-none focus:border-brand transition-colors"
               />
             </div>
             <div>
@@ -309,35 +357,70 @@ export default function OnboardingFlow() {
                 ))}
               </div>
             </div>
+            <div>
+              <label className="text-muted text-xs block mb-1">Age</label>
+              <input type="number" placeholder="30" value={age} onChange={(e) => setAge(e.target.value)}
+                className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-11 text-foreground focus:outline-none focus:border-brand" />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-muted text-xs block mb-1">Height (ft)</label>
                 <input type="number" placeholder="5" value={heightFt} onChange={(e) => setHeightFt(e.target.value)}
-                  className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-[44px] text-foreground focus:outline-none focus:border-brand" />
+                  className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-11 text-foreground focus:outline-none focus:border-brand" />
               </div>
               <div>
                 <label className="text-muted text-xs block mb-1">Height (in)</label>
                 <input type="number" placeholder="7" value={heightIn} onChange={(e) => setHeightIn(e.target.value)}
-                  className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-[44px] text-foreground focus:outline-none focus:border-brand" />
+                  className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-11 text-foreground focus:outline-none focus:border-brand" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-muted text-xs block mb-1">Current weight (lbs)</label>
                 <input type="number" placeholder="185" value={currentWeight} onChange={(e) => setCurrentWeight(e.target.value)}
-                  className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-[44px] text-foreground focus:outline-none focus:border-brand" />
+                  className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-11 text-foreground focus:outline-none focus:border-brand" />
               </div>
               <div>
                 <label className="text-muted text-xs block mb-1">Goal weight (lbs)</label>
                 <input type="number" placeholder="Optional" value={targetWeight} onChange={(e) => setTargetWeight(e.target.value)}
-                  className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-[44px] text-foreground focus:outline-none focus:border-brand" />
+                  className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-11 text-foreground focus:outline-none focus:border-brand" />
               </div>
             </div>
           </div>
         );
 
-      // ── Card 2: Experience ────────────────────────────────────────
+      // ── Card 2: Activity & Lifestyle (NEW) ───────────────────────
       case 2:
+        return (
+          <div className="space-y-4">
+            <h2 className="text-xl font-bold text-foreground">Activity & Lifestyle</h2>
+            <p className="text-muted text-sm">This powers your calorie and recovery calculations.</p>
+            <div>
+              <label className="text-muted text-xs block mb-2">Daily activity level (outside the gym)</label>
+              <div className="space-y-2">
+                <OptionButton selected={activityLevel === 'sedentary'} onClick={() => setActivityLevel('sedentary')}
+                  description="Desk job, little movement">Sedentary</OptionButton>
+                <OptionButton selected={activityLevel === 'lightly_active'} onClick={() => setActivityLevel('lightly_active')}
+                  description="Light walking, occasional movement">Lightly Active</OptionButton>
+                <OptionButton selected={activityLevel === 'moderately_active'} onClick={() => setActivityLevel('moderately_active')}
+                  description="On your feet part of the day">Moderately Active</OptionButton>
+                <OptionButton selected={activityLevel === 'very_active'} onClick={() => setActivityLevel('very_active')}
+                  description="Physical job or very active lifestyle">Very Active</OptionButton>
+                <OptionButton selected={activityLevel === 'extremely_active'} onClick={() => setActivityLevel('extremely_active')}
+                  description="Manual labor + regular training">Extremely Active</OptionButton>
+              </div>
+            </div>
+            <div>
+              <label className="text-muted text-xs block mb-1">Average daily steps (optional)</label>
+              <input type="number" placeholder="e.g. 8000" value={averageDailySteps}
+                onChange={(e) => setAverageDailySteps(e.target.value)}
+                className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-11 text-foreground focus:outline-none focus:border-brand" />
+            </div>
+          </div>
+        );
+
+      // ── Card 3: Experience ────────────────────────────────────────
+      case 3:
         return (
           <div className="space-y-3">
             <h2 className="text-xl font-bold text-foreground">Lifting Experience</h2>
@@ -363,8 +446,8 @@ export default function OnboardingFlow() {
           </div>
         );
 
-      // ── Card 3: Goal ──────────────────────────────────────────────
-      case 3:
+      // ── Card 4: Goal ──────────────────────────────────────────────
+      case 4:
         return (
           <div className="space-y-3">
             <h2 className="text-xl font-bold text-foreground">Primary Goal</h2>
@@ -394,8 +477,8 @@ export default function OnboardingFlow() {
           </div>
         );
 
-      // ── Card 4: Schedule ──────────────────────────────────────────
-      case 4:
+      // ── Card 5: Schedule ──────────────────────────────────────────
+      case 5:
         return (
           <div className="space-y-4">
             <h2 className="text-xl font-bold text-foreground">Training Schedule</h2>
@@ -436,8 +519,8 @@ export default function OnboardingFlow() {
           </div>
         );
 
-      // ── Card 5: Equipment ─────────────────────────────────────────
-      case 5:
+      // ── Card 6: Equipment ─────────────────────────────────────────
+      case 6:
         return (
           <div className="space-y-4">
             <h2 className="text-xl font-bold text-foreground">Equipment Access</h2>
@@ -462,8 +545,8 @@ export default function OnboardingFlow() {
           </div>
         );
 
-      // ── Card 6: Limitations ───────────────────────────────────────
-      case 6:
+      // ── Card 7: Limitations ───────────────────────────────────────
+      case 7:
         return (
           <div className="space-y-4">
             <h2 className="text-xl font-bold text-foreground">Limitations</h2>
@@ -485,14 +568,14 @@ export default function OnboardingFlow() {
                 placeholder="e.g., barbell back squat, skull crushers"
                 value={avoidedExercises}
                 onChange={(e) => setAvoidedExercises(e.target.value)}
-                className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-[44px] text-foreground placeholder-neutral-500 focus:outline-none focus:border-brand transition-colors"
+                className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 min-h-11 text-foreground placeholder-neutral-500 focus:outline-none focus:border-brand transition-colors"
               />
             </div>
           </div>
         );
 
-      // ── Card 7: Nutrition ─────────────────────────────────────────
-      case 7:
+      // ── Card 8: Nutrition ─────────────────────────────────────────
+      case 8:
         return (
           <div className="space-y-4">
             <h2 className="text-xl font-bold text-foreground">Nutrition</h2>
@@ -503,24 +586,28 @@ export default function OnboardingFlow() {
                 <ToggleChip selected={!tracksMacros} onClick={() => setTracksMacros(false)}>Not right now</ToggleChip>
               </div>
             </div>
-            {tracksMacros && cw && (
-              <div className="bg-surface-2 rounded-xl p-4 space-y-2">
-                <p className="text-sm text-secondary">Based on your weight, we recommend:</p>
-                <div className="grid grid-cols-3 gap-3 text-center">
-                  <div>
-                    <p className="text-2xl font-bold text-brand">{nutrition.proteinMin}-{nutrition.proteinMax}g</p>
-                    <p className="text-xs text-muted">Protein/day</p>
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-foreground">{nutrition.calorieTarget}</p>
-                    <p className="text-xs text-muted">Calories/day</p>
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-foreground">Adjustable</p>
-                    <p className="text-xs text-muted">in Settings</p>
+            {tracksMacros && (
+              <>
+                <div>
+                  <label className="text-muted text-xs block mb-2">Meals per day</label>
+                  <div className="flex flex-wrap gap-2">
+                    {(['2', '3', '4', '5', '6+'] as MealsPerDay[]).map((m) => (
+                      <ToggleChip key={m} selected={mealsPerDay === m} onClick={() => setMealsPerDay(m)}>{m}</ToggleChip>
+                    ))}
                   </div>
                 </div>
-              </div>
+                <div>
+                  <label className="text-muted text-xs block mb-2">Eating approach</label>
+                  <div className="space-y-2">
+                    <OptionButton selected={eatingApproach === 'no_preference'} onClick={() => setEatingApproach('no_preference')}>No preference</OptionButton>
+                    <OptionButton selected={eatingApproach === 'flexible_dieting'} onClick={() => setEatingApproach('flexible_dieting')}>Flexible dieting (IIFYM)</OptionButton>
+                    <OptionButton selected={eatingApproach === 'clean_eating'} onClick={() => setEatingApproach('clean_eating')}>Clean eating</OptionButton>
+                    <OptionButton selected={eatingApproach === 'keto'} onClick={() => setEatingApproach('keto')}>Keto / Low carb</OptionButton>
+                    <OptionButton selected={eatingApproach === 'high_carb'} onClick={() => setEatingApproach('high_carb')}>High carb</OptionButton>
+                    <OptionButton selected={eatingApproach === 'intermittent_fasting'} onClick={() => setEatingApproach('intermittent_fasting')}>Intermittent fasting</OptionButton>
+                  </div>
+                </div>
+              </>
             )}
             <div>
               <label className="text-muted text-xs block mb-2">Do you take creatine?</label>
@@ -532,10 +619,47 @@ export default function OnboardingFlow() {
           </div>
         );
 
-      // ── Card 8: Experience Tuning (conditional) ───────────────────
-      case 8: {
+      // ── Card 9: Emphasis & Progress Tracking (NEW) ────────────────
+      case 9:
+        return (
+          <div className="space-y-4">
+            <h2 className="text-xl font-bold text-foreground">Focus & Tracking</h2>
+            <div>
+              <label className="text-muted text-xs block mb-2">Areas to emphasize (optional)</label>
+              <div className="flex flex-wrap gap-2">
+                {['chest', 'back', 'shoulders', 'arms', 'quads', 'hamstrings', 'glutes', 'calves', 'core'].map((area) => (
+                  <ToggleChip key={area} selected={emphasisAreas.includes(area)}
+                    onClick={() => toggleArray(emphasisAreas, area, setEmphasisAreas)}>
+                    {area.charAt(0).toUpperCase() + area.slice(1)}
+                  </ToggleChip>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-muted text-xs block mb-2">How do you track progress?</label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { value: 'scale', label: 'Scale' },
+                  { value: 'tape_measure', label: 'Tape Measure' },
+                  { value: 'progress_photos', label: 'Progress Photos' },
+                  { value: 'strength_prs', label: 'Strength PRs' },
+                  { value: 'mirror', label: 'Mirror' },
+                  { value: 'body_fat_test', label: 'Body Fat Test' },
+                ].map(({ value, label }) => (
+                  <ToggleChip key={value} selected={progressTrackingMethods.includes(value)}
+                    onClick={() => toggleArray(progressTrackingMethods, value, setProgressTrackingMethods)}>
+                    {label}
+                  </ToggleChip>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+
+      // ── Card 10: Experience Tuning (conditional) ──────────────────
+      case 10: {
         if (!isExperienced) {
-          // Skip: auto-advance for beginners/intermediates
+          // For non-experienced: show form tips preference
           return (
             <div className="space-y-4">
               <h2 className="text-xl font-bold text-foreground">Form Tips</h2>
@@ -599,8 +723,15 @@ export default function OnboardingFlow() {
         );
       }
 
-      // ── Card 9: Summary ───────────────────────────────────────────
-      case 9:
+      // ── Card 11: Nutrition Preview (auto-skip in flow) ────────────
+      // This card is visually the same step as 10 for non-experienced users.
+      // For experienced users, they get one more card. Either way we show
+      // the auto-advance by combining 10+11 into one visual step.
+      // We handle this by making the non-experienced case skip from 10→12.
+
+      // ── Card 12: Summary ──────────────────────────────────────────
+      case 11:
+      case 12:
         return (
           <div className="space-y-4">
             <h2 className="text-xl font-bold text-foreground">Your Program</h2>
@@ -620,7 +751,56 @@ export default function OnboardingFlow() {
                   </span>
                 </div>
 
-                {/* Key stats */}
+                {/* Scientific Nutrition Breakdown */}
+                <div className="bg-surface-2 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Flame size={16} className="text-brand" />
+                    <h3 className="text-sm font-semibold text-foreground">Energy & Macros</h3>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-surface-3 rounded-lg p-2.5 text-center">
+                      <p className="text-xs text-muted">BMR</p>
+                      <p className="text-lg font-bold text-foreground">{params.bmr}</p>
+                      <p className="text-xs text-faint">cal/day</p>
+                    </div>
+                    <div className="bg-surface-3 rounded-lg p-2.5 text-center">
+                      <p className="text-xs text-muted">TDEE</p>
+                      <p className="text-lg font-bold text-foreground">{params.tdee}</p>
+                      <p className="text-xs text-faint">cal/day</p>
+                    </div>
+                  </div>
+                  <div className="bg-brand/10 rounded-lg p-3 text-center">
+                    <p className="text-xs text-muted">Target Calories</p>
+                    <p className="text-2xl font-bold text-brand">{params.calorieTarget}</p>
+                    <p className="text-xs text-faint">
+                      {primaryGoal === 'lose_fat' ? '20% deficit' : primaryGoal === 'build_muscle' || primaryGoal === 'get_stronger' ? '10% surplus' : 'maintenance'}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div>
+                      <p className="text-lg font-bold text-brand">{params.proteinTargetMin}-{params.proteinTargetMax}g</p>
+                      <p className="text-xs text-muted">Protein</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-foreground">{params.fatTarget}g</p>
+                      <p className="text-xs text-muted">Fat</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-foreground">{params.carbTarget}g</p>
+                      <p className="text-xs text-muted">Carbs</p>
+                    </div>
+                  </div>
+                  {bmi && (
+                    <p className="text-xs text-muted text-center">BMI: {bmi}</p>
+                  )}
+                  {weeksToGoal && (
+                    <p className="text-xs text-muted text-center">
+                      Estimated timeline: ~{weeksToGoal} weeks to goal weight
+                    </p>
+                  )}
+                </div>
+
+                {/* Key training stats */}
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-surface-2 rounded-xl p-3 text-center">
                     <Dumbbell size={18} className="text-brand mx-auto mb-1" />
@@ -633,9 +813,9 @@ export default function OnboardingFlow() {
                     <p className="text-xs text-muted">Starting</p>
                   </div>
                   <div className="bg-surface-2 rounded-xl p-3 text-center">
-                    <Heart size={18} className="text-brand mx-auto mb-1" />
-                    <p className="text-lg font-bold text-foreground">{params.proteinTargetMin}-{params.proteinTargetMax}g</p>
-                    <p className="text-xs text-muted">Protein/day</p>
+                    <Activity size={18} className="text-brand mx-auto mb-1" />
+                    <p className="text-lg font-bold text-foreground">{params.setsPerMusclePerWeek}</p>
+                    <p className="text-xs text-muted">Sets/muscle/wk</p>
                   </div>
                 </div>
 
@@ -660,7 +840,7 @@ export default function OnboardingFlow() {
                 </div>
 
                 <p className="text-xs text-muted text-center">
-                  Deload every {params.weeksBetweenDeloads} weeks · {params.setsPerMusclePerWeek} sets/muscle/week · {params.cardioSessionsPerWeek} cardio sessions/week
+                  Deload every {params.weeksBetweenDeloads} weeks · {params.cardioSessionsPerWeek} cardio sessions/week
                 </p>
               </>
             )}
@@ -691,20 +871,20 @@ export default function OnboardingFlow() {
           {step > 0 && (
             <button
               onClick={handleBack}
-              className="flex items-center justify-center gap-1 px-4 py-3 min-h-[44px] bg-surface-2 text-secondary rounded-xl text-sm font-medium hover:bg-surface-3 transition-colors"
+              className="flex items-center justify-center gap-1 px-4 py-3 min-h-11 bg-surface-2 text-secondary rounded-xl text-sm font-medium hover:bg-surface-3 transition-colors"
             >
               <ChevronLeft size={18} />
               Back
             </button>
           )}
           <button
-            onClick={step === TOTAL_STEPS - 1 ? handleComplete : handleNext}
+            onClick={isFinalStep ? handleComplete : handleNext}
             disabled={!canAdvance || saving}
-            className="flex-1 flex items-center justify-center gap-2 py-3 min-h-[44px] bg-brand hover:bg-brand-dark text-white rounded-xl font-semibold transition-colors disabled:opacity-50"
+            className="flex-1 flex items-center justify-center gap-2 py-3 min-h-11 bg-brand hover:bg-brand-dark text-white rounded-xl font-semibold transition-colors disabled:opacity-50"
           >
             {saving ? (
               <Loader2 size={18} className="animate-spin" />
-            ) : step === TOTAL_STEPS - 1 ? (
+            ) : isFinalStep ? (
               <>
                 <Check size={18} />
                 Build My Program
