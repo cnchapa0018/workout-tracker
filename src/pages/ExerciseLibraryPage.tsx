@@ -478,66 +478,65 @@ interface ExerciseRowProps {
 
 function ExerciseRow({ exercise: ex, swapMode, swapping, disabled, onSelect, onInfo, isFavorite, onToggleFavorite }: ExerciseRowProps) {
   return (
-    <div className="relative flex items-center gap-0">
-      <button
-        onClick={onSelect}
-        disabled={disabled}
-        className="flex-1 flex items-center gap-3 p-3 min-h-11 bg-surface-2 hover:bg-surface-3 rounded-xl border border-border transition-colors text-left disabled:opacity-50"
-      >
-        {ex.gif_url ? (
-          <img src={ex.gif_url} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" />
-        ) : ex.image_urls && ex.image_urls.length > 0 ? (
-          <img src={ex.image_urls[0]} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" loading="lazy" />
-        ) : (
-          <div className="w-12 h-12 rounded-lg bg-surface-3 flex items-center justify-center shrink-0">
-            <Dumbbell size={18} className="text-neutral-600" />
-          </div>
-        )}
-        <div className="flex-1 min-w-0">
-          <p className="text-foreground text-sm font-medium truncate">{ex.name}</p>
-          <div className="flex items-center gap-2 text-xs text-faint mt-0.5">
-            {ex.body_part && <span>{ex.body_part}</span>}
-            <span>·</span>
-            <span>{ex.movement_pool.replace(/_/g, ' ')}</span>
-            {ex.is_compound && (
-              <>
-                <span>·</span>
-                <span className="text-blue-400">compound</span>
-              </>
-            )}
-          </div>
-          {ex.primary_muscles && ex.primary_muscles.length > 0 && (
-            <p className="text-neutral-600 text-xs mt-0.5 truncate">
-              {ex.primary_muscles.join(', ')}
-            </p>
+    <div
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      className={`flex items-center gap-3 p-3 min-h-11 bg-surface-2 hover:bg-surface-3 rounded-xl border border-border transition-colors text-left ${disabled ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}
+    >
+      {ex.gif_url ? (
+        <img src={ex.gif_url} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" />
+      ) : ex.image_urls && ex.image_urls.length > 0 ? (
+        <img src={ex.image_urls[0]} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" loading="lazy" />
+      ) : (
+        <div className="w-12 h-12 rounded-lg bg-surface-3 flex items-center justify-center shrink-0">
+          <Dumbbell size={18} className="text-neutral-600" />
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        <p className="text-foreground text-sm font-medium truncate">{ex.name}</p>
+        <div className="flex items-center gap-2 text-xs text-faint mt-0.5">
+          {ex.body_part && <span>{ex.body_part}</span>}
+          <span>·</span>
+          <span>{ex.movement_pool.replace(/_/g, ' ')}</span>
+          {ex.is_compound && (
+            <>
+              <span>·</span>
+              <span className="text-blue-400">compound</span>
+            </>
           )}
         </div>
-        {swapMode ? (
-          swapping ? (
-            <Loader2 size={16} className="text-brand animate-spin shrink-0" />
-          ) : (
-            <ArrowLeftRight size={16} className="text-brand shrink-0" />
-          )
+        {ex.primary_muscles && ex.primary_muscles.length > 0 && (
+          <p className="text-neutral-600 text-xs mt-0.5 truncate">
+            {ex.primary_muscles.join(', ')}
+          </p>
+        )}
+      </div>
+      {swapMode ? (
+        swapping ? (
+          <Loader2 size={16} className="text-brand animate-spin shrink-0" />
         ) : (
+          <ArrowLeftRight size={16} className="text-brand shrink-0" />
+        )
+      ) : (
+        <div className="flex flex-col items-center gap-1 shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+            className="p-1.5 min-h-11 min-w-11 flex items-center justify-center"
+            aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <Heart
+              size={16}
+              className={isFavorite ? 'text-red-500 fill-red-500' : 'text-faint'}
+            />
+          </button>
           <button
             onClick={(e) => { e.stopPropagation(); onInfo(); }}
-            className="p-2 min-h-11 min-w-11 shrink-0"
+            className="p-1.5 min-h-11 min-w-11 flex items-center justify-center"
           >
             <ChevronDown size={14} className="text-faint" />
           </button>
-        )}
-      </button>
-      {!swapMode && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
-          className="p-2 min-h-11 min-w-11 shrink-0 flex items-center justify-center"
-          aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-        >
-          <Heart
-            size={16}
-            className={isFavorite ? 'text-red-500 fill-red-500' : 'text-faint'}
-          />
-        </button>
+        </div>
       )}
     </div>
   );
