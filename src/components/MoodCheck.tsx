@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Flame, Zap, Battery, BatteryLow, Clock, ArrowRight, X } from 'lucide-react';
+import { Flame, Activity, BatteryLow, Clock, ArrowRight, X, Sparkles } from 'lucide-react';
 import type { PreMood } from '../types/database';
 
 interface MoodCheckProps {
@@ -7,39 +7,79 @@ interface MoodCheckProps {
   onSkip: () => void;
 }
 
-const MOOD_OPTIONS: Array<{ value: PreMood; label: string; emoji: typeof Flame; color: string; desc: string }> = [
-  { value: 'fired_up', label: 'Fired Up', emoji: Flame, color: 'text-orange-400', desc: 'Ready to push limits' },
-  { value: 'steady', label: 'Steady', emoji: Zap, color: 'text-blue-400', desc: 'Solid and consistent' },
-  { value: 'low', label: 'Low', emoji: Battery, color: 'text-yellow-400', desc: 'Low energy, fatigued' },
-  { value: 'beat_up', label: 'Beat Up', emoji: BatteryLow, color: 'text-red-400', desc: 'Need recovery mode' },
+const MOOD_OPTIONS: Array<{
+  value: PreMood;
+  label: string;
+  icon: typeof Flame;
+  color: string;
+  bg: string;
+  border: string;
+  desc: string;
+  detail: string;
+}> = [
+  {
+    value: 'energized',
+    label: 'Energized',
+    icon: Flame,
+    color: 'text-orange-400',
+    bg: 'bg-orange-500/15',
+    border: 'border-orange-500/40 ring-orange-500/30',
+    desc: 'Push harder today',
+    detail: 'Lower RIR, full volume — time to chase PRs.',
+  },
+  {
+    value: 'normal',
+    label: 'Normal',
+    icon: Activity,
+    color: 'text-blue-400',
+    bg: 'bg-blue-500/15',
+    border: 'border-blue-500/40 ring-blue-500/30',
+    desc: 'Run the program',
+    detail: 'Standard intensity, programmed volume.',
+  },
+  {
+    value: 'low_energy',
+    label: 'Low Energy',
+    icon: BatteryLow,
+    color: 'text-yellow-400',
+    bg: 'bg-yellow-500/15',
+    border: 'border-yellow-500/40 ring-yellow-500/30',
+    desc: 'Swap to easier lifts',
+    detail: 'Same muscle groups, easier exercises. Still get the work done.',
+  },
 ];
 
-const TIME_OPTIONS = [30, 45, 60, 75, 90];
+const TIME_OPTIONS = [20, 30, 45, 60, 75, 90];
 
 export function MoodCheck({ onSubmit, onSkip }: MoodCheckProps) {
   const [mood, setMood] = useState<PreMood | null>(null);
-  const [energy, setEnergy] = useState(3);
   const [timeMinutes, setTimeMinutes] = useState(60);
-  const [step, setStep] = useState<'mood' | 'energy' | 'time'>('mood');
+  const [step, setStep] = useState<'mood' | 'time'>('mood');
 
   const handleNext = () => {
-    if (step === 'mood' && mood) setStep('energy');
-    else if (step === 'energy') setStep('time');
-    else if (step === 'time' && mood) onSubmit(mood, energy, timeMinutes);
+    if (step === 'mood' && mood) setStep('time');
+    else if (step === 'time' && mood) {
+      // Map mood to energy level for backward compat
+      const energyMap: Record<PreMood, number> = { energized: 5, normal: 3, low_energy: 1 };
+      onSubmit(mood, energyMap[mood], timeMinutes);
+    }
   };
+
+  const selectedMood = MOOD_OPTIONS.find((m) => m.value === mood);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-surface-2 rounded-2xl p-6 space-y-6 animate-slide-up">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-bold text-foreground">Pre-Workout Check</h2>
-            <p className="text-muted text-sm">
-              {step === 'mood' && 'How are you feeling?'}
-              {step === 'energy' && 'Energy level?'}
-              {step === 'time' && 'Time available?'}
-            </p>
+          <div className="flex items-center gap-2">
+            <Sparkles size={20} className="text-brand" />
+            <div>
+              <h2 className="text-lg font-bold text-foreground">How are you feeling?</h2>
+              <p className="text-muted text-xs">
+                {step === 'mood' ? 'I\'ll adapt your workout automatically.' : 'How much time do you have?'}
+              </p>
+            </div>
           </div>
           <button
             onClick={onSkip}
@@ -51,11 +91,11 @@ export function MoodCheck({ onSubmit, onSkip }: MoodCheckProps) {
 
         {/* Step indicators */}
         <div className="flex gap-2">
-          {['mood', 'energy', 'time'].map((s, i) => (
+          {['mood', 'time'].map((s, i) => (
             <div
               key={s}
               className={`h-1 flex-1 rounded-full transition-colors ${
-                i <= ['mood', 'energy', 'time'].indexOf(step) ? 'bg-brand' : 'bg-surface-3'
+                i <= ['mood', 'time'].indexOf(step) ? 'bg-brand' : 'bg-surface-3'
               }`}
             />
           ))}
@@ -63,71 +103,61 @@ export function MoodCheck({ onSubmit, onSkip }: MoodCheckProps) {
 
         {/* Mood selection */}
         {step === 'mood' && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-3">
             {MOOD_OPTIONS.map((opt) => {
-              const Icon = opt.emoji;
+              const Icon = opt.icon;
+              const isSelected = mood === opt.value;
               return (
                 <button
                   key={opt.value}
                   onClick={() => setMood(opt.value)}
-                  className={`flex flex-col items-center gap-2 p-4 min-h-11 rounded-xl border transition-all ${
-                    mood === opt.value
-                      ? 'bg-brand/15 border-brand/40 ring-1 ring-brand/30'
+                  className={`w-full flex items-center gap-4 p-4 min-h-11 rounded-xl border transition-all text-left ${
+                    isSelected
+                      ? `${opt.bg} ${opt.border} ring-1`
                       : 'bg-surface-3 border-border-2 hover:border-neutral-600'
                   }`}
                 >
-                  <Icon size={28} className={opt.color} />
-                  <span className="text-foreground font-medium text-sm">{opt.label}</span>
-                  <span className="text-faint text-xs text-center">{opt.desc}</span>
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${isSelected ? opt.bg : 'bg-surface-2'}`}>
+                    <Icon size={24} className={isSelected ? opt.color : 'text-faint'} />
+                  </div>
+                  <div className="flex-1">
+                    <p className={`font-semibold text-sm ${isSelected ? 'text-foreground' : 'text-secondary'}`}>
+                      {opt.label}
+                    </p>
+                    <p className={`text-xs ${isSelected ? opt.color : 'text-faint'}`}>{opt.desc}</p>
+                    {isSelected && (
+                      <p className="text-xs text-muted mt-1 animate-fade-in">{opt.detail}</p>
+                    )}
+                  </div>
                 </button>
               );
             })}
           </div>
         )}
 
-        {/* Energy level */}
-        {step === 'energy' && (
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              {[1, 2, 3, 4, 5].map((level) => (
-                <button
-                  key={level}
-                  onClick={() => setEnergy(level)}
-                  className={`w-14 h-14 rounded-xl flex items-center justify-center text-lg font-bold transition-all ${
-                    energy === level
-                      ? 'bg-brand text-white scale-110'
-                      : energy > level
-                        ? 'bg-brand/20 text-brand'
-                        : 'bg-surface-3 text-faint'
-                  }`}
-                >
-                  {level}
-                </button>
-              ))}
-            </div>
-            <div className="flex justify-between text-xs text-faint">
-              <span>Exhausted</span>
-              <span>Peak</span>
-            </div>
-          </div>
-        )}
-
         {/* Time available */}
         {step === 'time' && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
+          <div className="space-y-4">
+            {selectedMood && (
+              <div className={`flex items-center gap-2 p-3 rounded-xl ${selectedMood.bg}`}>
+                <selectedMood.icon size={16} className={selectedMood.color} />
+                <span className={`text-sm font-medium ${selectedMood.color}`}>{selectedMood.label}</span>
+                <span className="text-faint text-sm">— {selectedMood.desc}</span>
+              </div>
+            )}
+            <div className="grid grid-cols-3 gap-2">
               {TIME_OPTIONS.map((mins) => (
                 <button
                   key={mins}
                   onClick={() => setTimeMinutes(mins)}
-                  className={`flex items-center gap-1.5 px-4 py-3 min-h-11 rounded-xl text-sm font-medium transition-all ${
+                  className={`flex flex-col items-center gap-1 px-3 py-3 min-h-11 rounded-xl text-sm font-medium transition-all ${
                     timeMinutes === mins
                       ? 'bg-brand text-white'
-                      : 'bg-surface-3 text-muted border border-border-2'
+                      : 'bg-surface-3 text-muted border border-border-2 hover:border-neutral-600'
                   }`}
                 >
-                  <Clock size={14} />
-                  {mins} min
+                  <Clock size={16} />
+                  <span>{mins}m</span>
                 </button>
               ))}
             </div>
@@ -136,9 +166,9 @@ export function MoodCheck({ onSubmit, onSkip }: MoodCheckProps) {
 
         {/* Action buttons */}
         <div className="flex gap-3">
-          {step !== 'mood' && (
+          {step === 'time' && (
             <button
-              onClick={() => setStep(step === 'time' ? 'energy' : 'mood')}
+              onClick={() => setStep('mood')}
               className="flex-1 py-3 min-h-11 rounded-xl bg-surface-3 text-secondary font-medium transition-colors hover:bg-surface-3/80"
             >
               Back
@@ -147,10 +177,19 @@ export function MoodCheck({ onSubmit, onSkip }: MoodCheckProps) {
           <button
             onClick={handleNext}
             disabled={step === 'mood' && !mood}
-            className="flex-1 py-3 min-h-11 rounded-xl bg-brand hover:bg-brand-dark text-white font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            className="flex-1 py-3.5 min-h-11 rounded-xl bg-brand hover:bg-brand-dark text-white font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {step === 'time' ? 'Start' : 'Next'}
-            <ArrowRight size={16} />
+            {step === 'time' ? (
+              <>
+                <Sparkles size={16} />
+                Adapt & Start
+              </>
+            ) : (
+              <>
+                Next
+                <ArrowRight size={16} />
+              </>
+            )}
           </button>
         </div>
 
@@ -159,7 +198,7 @@ export function MoodCheck({ onSubmit, onSkip }: MoodCheckProps) {
           onClick={onSkip}
           className="w-full text-center text-faint text-sm hover:text-secondary transition-colors min-h-11 flex items-center justify-center"
         >
-          Skip check & run standard program
+          Skip — run standard program
         </button>
       </div>
     </div>

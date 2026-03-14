@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Play, CheckCircle, ChevronDown, ChevronUp, ArrowLeftRight, AlertTriangle, Loader2, Video, Info, Music, Flame, Zap, Battery, BatteryLow, Clock } from 'lucide-react';
+import { Play, CheckCircle, ChevronDown, ChevronUp, ArrowLeftRight, AlertTriangle, Loader2, Video, Info, Music, Flame, Activity, BatteryLow, Clock, Sparkles, ExternalLink } from 'lucide-react';
 import { useWorkout, type BlockExerciseWithDetails } from '../hooks/useWorkout';
 import { useAuth } from '../hooks/useAuth';
 import { useRestTimerContext } from '../context/RestTimerContext';
@@ -57,6 +57,7 @@ export default function TodayPage() {
   const [detailExercise, setDetailExercise] = useState<BlockExerciseWithDetails | null>(null);
   const [videoExpanded, setVideoExpanded] = useState<string | null>(null);
   const [progressionHints, setProgressionHints] = useState<Map<string, { shouldIncrease: boolean; suggestedWeight: number | null; stallCount: number; message: string }>>(new Map());
+  const [swappedExerciseDetails, setSwappedExerciseDetails] = useState<Map<string, BlockExerciseWithDetails['exercise']>>(new Map());
 
   const dayExercises = useMemo(() => {
     let exercises = blockExercises
@@ -80,6 +81,20 @@ export default function TodayPage() {
 
     // Apply mood + time adjustments if set
     if (moodEngine.adjustments && moodEngine.moodInput) {
+      // Apply exercise swaps from agentic engine (low_energy mode)
+      if (moodEngine.decision?.swaps && moodEngine.decision.swaps.length > 0) {
+        for (const swap of moodEngine.decision.swaps) {
+          exercises = exercises.map((be) => {
+            if (be.exercise_id !== swap.originalId) return be;
+            const swapExercise = swappedExerciseDetails.get(swap.newId);
+            if (swapExercise) {
+              return { ...be, exercise_id: swap.newId, exercise: swapExercise };
+            }
+            return be;
+          });
+        }
+      }
+
       const trimmed = trimToFitTime(
         exercises as unknown as BlockExercise[],
         moodEngine.moodInput.timeAvailableMinutes,
@@ -87,7 +102,7 @@ export default function TodayPage() {
       );
       // Re-attach the exercise details
       exercises = trimmed.map((adj) => {
-        const original = blockExercises.find((be) => be.id === adj.id);
+        const original = exercises.find((be) => be.id === adj.id);
         return original ? { ...original, ...adj } : adj as unknown as BlockExerciseWithDetails;
       });
     } else if (moodEngine.adjustments) {
@@ -102,7 +117,7 @@ export default function TodayPage() {
     }
 
     return exercises;
-  }, [blockExercises, selectedDay, weekNumber, microVar, moodEngine.adjustments, moodEngine.moodInput]);
+  }, [blockExercises, selectedDay, weekNumber, microVar, moodEngine.adjustments, moodEngine.moodInput, moodEngine.decision, swappedExerciseDetails]);
 
   // Estimated workout time
   const estimatedTime = useMemo(() => {
@@ -145,14 +160,40 @@ export default function TodayPage() {
 
   const handleMoodSubmit = useCallback(async (mood: PreMood, energy: number, timeMinutes: number) => {
     setShowMoodCheck(false);
-    moodEngine.submitMood({ preMood: mood, energyLevel: energy, timeAvailableMinutes: timeMinutes });
     setStartingWorkout(true);
+
+    // Pass current exercises so the agentic engine can find easier swaps
+    const currentExercises = blockExercises
+      .filter((be) => be.day_template === selectedDay)
+      .sort((a, b) => a.slot_order - b.slot_order);
+
+    const decision = await moodEngine.submitMood(
+      { preMood: mood, energyLevel: energy, timeAvailableMinutes: timeMinutes },
+      currentExercises as unknown as BlockExercise[],
+    );
+
+    // Fetch exercise details for any swapped exercises
+    if (decision.swaps.length > 0) {
+      const swapIds = decision.swaps.map((s) => s.newId);
+      const { data: swapDetails } = await supabase
+        .from('exercises')
+        .select('*')
+        .in('id', swapIds);
+      if (swapDetails) {
+        const map = new Map<string, BlockExerciseWithDetails['exercise']>();
+        for (const ex of swapDetails as Array<{ id: string } & Record<string, unknown>>) {
+          map.set(ex.id, ex as unknown as BlockExerciseWithDetails['exercise']);
+        }
+        setSwappedExerciseDetails(map);
+      }
+    }
+
     const session = await startWorkout(selectedDay, weekNumber);
     if (session) {
       await moodEngine.saveMoodToSession(session.id);
     }
     setStartingWorkout(false);
-  }, [startWorkout, selectedDay, weekNumber, moodEngine]);
+  }, [startWorkout, selectedDay, weekNumber, moodEngine, blockExercises]);
 
   const handleSkipMood = useCallback(async () => {
     setShowMoodCheck(false);
@@ -238,52 +279,60 @@ export default function TodayPage() {
         </div>
       </div>
 
-      {/* Mood adjustment banner */}
-      {moodEngine.adjustments && todaySession && (
-        <div className="bg-brand/10 border border-brand/20 rounded-xl p-3 flex items-start gap-2">
-          <Info size={16} className="text-brand shrink-0 mt-0.5" />
-          <p className="text-brand text-sm">{moodEngine.adjustments.message}</p>
-        </div>
-      )}
-
-      {/* Mood indicator during active session */}
-      {todaySession && moodEngine.moodInput && (
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2 text-sm">
-            {moodEngine.moodInput.preMood === 'fired_up' && <Flame size={16} className="text-orange-400" />}
-            {moodEngine.moodInput.preMood === 'steady' && <Zap size={16} className="text-blue-400" />}
-            {moodEngine.moodInput.preMood === 'low' && <Battery size={16} className="text-yellow-400" />}
-            {moodEngine.moodInput.preMood === 'beat_up' && <BatteryLow size={16} className="text-red-400" />}
-            <span className="text-foreground font-medium capitalize">{moodEngine.moodInput.preMood?.replace('_', ' ')}</span>
-            <span className="text-faint">·</span>
-            <span className="text-muted">Energy {moodEngine.moodInput.energyLevel}/5</span>
-            {moodEngine.moodInput.timeAvailableMinutes && (
-              <>
-                <span className="text-faint">·</span>
-                <Clock size={14} className="text-muted" />
-                <span className="text-muted">{moodEngine.moodInput.timeAvailableMinutes}m</span>
-              </>
-            )}
+      {/* Agentic mood reasoning panel */}
+      {moodEngine.decision && todaySession && (
+        <div className="bg-surface-2 border border-brand/20 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2 bg-brand/10 border-b border-brand/20">
+            <Sparkles size={14} className="text-brand" />
+            <span className="text-brand text-xs font-semibold">AI Workout Adaptation</span>
           </div>
-          <a
-            href="spotify://"
-            className="flex items-center gap-2 bg-[#1DB954]/15 text-[#1DB954] rounded-xl px-3 py-2 text-sm font-medium hover:bg-[#1DB954]/25 transition-colors"
-          >
-            <Music size={16} />
-            Spotify
-          </a>
+          <div className="p-3 space-y-1">
+            {moodEngine.decision.reasoning.map((line, i) => (
+              <p key={i} className={`text-sm ${line.startsWith('  →') ? 'text-muted pl-2' : 'text-foreground'}`}>
+                {line}
+              </p>
+            ))}
+          </div>
         </div>
       )}
 
-      {/* Spotify launcher (no mood logged) */}
-      {todaySession && !moodEngine.moodInput && (
-        <div className="flex justify-end">
+      {/* Adapting spinner */}
+      {moodEngine.adapting && (
+        <div className="flex items-center gap-3 bg-surface-2 rounded-xl p-4">
+          <Loader2 size={18} className="text-brand animate-spin" />
+          <span className="text-muted text-sm">Analyzing your mood and adapting workout...</span>
+        </div>
+      )}
+
+      {/* Mood indicator + Spotify during active session */}
+      {todaySession && (
+        <div className="flex items-center gap-2">
+          {moodEngine.moodInput && (
+            <div className="flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2 text-sm flex-1">
+              {moodEngine.moodInput.preMood === 'energized' && <Flame size={16} className="text-orange-400" />}
+              {moodEngine.moodInput.preMood === 'normal' && <Activity size={16} className="text-blue-400" />}
+              {moodEngine.moodInput.preMood === 'low_energy' && <BatteryLow size={16} className="text-yellow-400" />}
+              <span className="text-foreground font-medium capitalize">{moodEngine.moodInput.preMood?.replace('_', ' ')}</span>
+              <span className="text-faint">·</span>
+              <Clock size={14} className="text-muted" />
+              <span className="text-muted">{moodEngine.moodInput.timeAvailableMinutes}m</span>
+              {moodEngine.decision && moodEngine.decision.swaps.length > 0 && (
+                <>
+                  <span className="text-faint">·</span>
+                  <span className="text-brand text-xs">{moodEngine.decision.swaps.length} swap{moodEngine.decision.swaps.length > 1 ? 's' : ''}</span>
+                </>
+              )}
+            </div>
+          )}
           <a
-            href="spotify://"
-            className="flex items-center gap-2 bg-[#1DB954]/15 text-[#1DB954] rounded-xl px-3 py-2 text-sm font-medium hover:bg-[#1DB954]/25 transition-colors"
+            href={moodEngine.decision
+              ? `spotify:search:${encodeURIComponent(moodEngine.decision.spotifySearchQuery)}`
+              : 'spotify:search:workout%20motivation'
+            }
+            className="flex items-center gap-2 bg-[#1DB954]/15 text-[#1DB954] rounded-xl px-3 py-2 text-sm font-medium hover:bg-[#1DB954]/25 transition-colors shrink-0"
           >
             <Music size={16} />
-            Spotify
+            <ExternalLink size={12} />
           </a>
         </div>
       )}
@@ -335,9 +384,12 @@ export default function TodayPage() {
           )}
 
           {/* Pre-workout mood prompt */}
-          <div className="bg-surface-2 border border-border rounded-xl p-4 space-y-2">
-            <p className="text-foreground text-sm font-medium">How are you feeling today?</p>
-            <p className="text-faint text-xs">Tap start to log your mood, energy & time — we&apos;ll auto-adjust your workout.</p>
+          <div className="bg-surface-2 border border-brand/20 rounded-xl p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <Sparkles size={16} className="text-brand" />
+              <p className="text-foreground text-sm font-medium">How are you feeling?</p>
+            </div>
+            <p className="text-faint text-xs">I&apos;ll adapt exercises, volume, and intensity to match your energy and time.</p>
           </div>
 
           {/* Start workout button */}

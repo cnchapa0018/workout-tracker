@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from './useAuth';
 import type { PreMood, BlockExercise } from '../types/database';
 
+// ─── Types ──────────────────────────────────────────────────────────────────────
+
 interface MoodInput {
   preMood: PreMood;
   energyLevel: number; // 1-5
@@ -21,11 +23,45 @@ interface MoodAdjustments {
   timeCategory: 'full' | 'moderate' | 'quick';
 }
 
+interface ExerciseSwap {
+  originalId: string;
+  originalName: string;
+  newId: string;
+  newName: string;
+  reason: string;
+}
+
+interface MoodDecision {
+  adjustments: MoodAdjustments;
+  swaps: ExerciseSwap[];
+  reasoning: string[];
+  spotifyGenre: string;
+  spotifySearchQuery: string;
+}
+
+// ─── Constants ──────────────────────────────────────────────────────────────────
+
 // Average time per set in seconds (set execution + rest + transition)
 const AVG_SECONDS_PER_SET_COMPOUND = 210; // ~3.5 min (heavy set + longer rest)
 const AVG_SECONDS_PER_SET_ACCESSORY = 150; // ~2.5 min (moderate set + rest)
 const AVG_SECONDS_PER_SET_ISOLATION = 120; // ~2 min (lighter set + short rest)
 const WARMUP_MINUTES = 5;
+
+// Difficulty ranking — lower number = easier
+const DIFFICULTY_RANK: Record<string, number> = {
+  beginner: 1,
+  intermediate: 2,
+  expert: 3,
+};
+
+// Spotify deep link URIs by mood
+const SPOTIFY_CONFIG: Record<PreMood, { genre: string; searchQuery: string }> = {
+  energized: { genre: 'workout', searchQuery: 'intense gym workout heavy bass' },
+  normal: { genre: 'workout', searchQuery: 'workout motivation hip hop' },
+  low_energy: { genre: 'chill', searchQuery: 'chill workout lofi beats focus' },
+};
+
+// ─── Time Estimation ────────────────────────────────────────────────────────────
 
 /**
  * Estimate total workout time in minutes for a set of exercises.
@@ -51,11 +87,12 @@ function computeTimeCategory(minutes: number): 'full' | 'moderate' | 'quick' {
   return 'quick';
 }
 
+// ─── Adjustment Logic ───────────────────────────────────────────────────────────
+
 function computeAdjustments(input: MoodInput): MoodAdjustments {
-  const { preMood, energyLevel, timeAvailableMinutes } = input;
+  const { preMood, timeAvailableMinutes } = input;
   const timeCategory = computeTimeCategory(timeAvailableMinutes);
 
-  // Base from mood/energy
   let setsMultiplier = 1.0;
   let rirAdjustment = 0;
   let restMultiplier = 1.0;
@@ -65,59 +102,41 @@ function computeAdjustments(input: MoodInput): MoodAdjustments {
   let maxSetsOther: number | null = null;
   let message = '';
 
-  // Energy/mood adjustments
+  // ── Mood-based adjustments ──
   switch (preMood) {
-    case 'fired_up':
-      rirAdjustment = energyLevel >= 4 ? -1 : 0;
-      message = energyLevel >= 4
-        ? 'Feeling great — push to RIR 1 on compounds.'
-        : 'Good energy — programmed RIR.';
+    case 'energized':
+      rirAdjustment = -1; // Push harder, lower RIR
+      message = 'Feeling great — pushing intensity. RIR -1 on everything.';
       break;
 
-    case 'steady':
-      message = 'Solid baseline — running the program.';
+    case 'normal':
+      message = 'Running the program as written.';
       break;
 
-    case 'low':
-      setsMultiplier = energyLevel <= 2 ? 0.75 : 0.85;
-      rirAdjustment = 1;
-      restMultiplier = 1.2;
-      skipAccessories = energyLevel <= 2;
-      message = energyLevel <= 2
-        ? 'Low energy — dropping volume 25%, compounds only.'
-        : 'Moderate fatigue — slight volume reduction.';
-      break;
-
-    case 'beat_up':
-      setsMultiplier = 0.6;
-      rirAdjustment = 2;
-      restMultiplier = 1.5;
-      skipAccessories = true;
-      message = 'Recovery mode — 40% volume cut, compounds only.';
+    case 'low_energy':
+      rirAdjustment = 1; // More reps in reserve
+      restMultiplier = 1.25; // Longer rest
+      message = 'Low energy — swapping to easier exercises, higher RIR.';
       break;
   }
 
-  // Time adjustments (override/layer on top of mood)
+  // ── Time-based adjustments (layered on mood) ──
   switch (timeCategory) {
     case 'full':
-      // No time constraints
       break;
 
     case 'moderate':
-      // Drop last isolation, reduce rest by 15s (~15% reduction)
       dropIsolations = true;
       restMultiplier = Math.min(restMultiplier, 0.85);
-      message += ` · Moderate time — dropping isolations, shorter rest.`;
+      message += ' Moderate time — dropping isolations.';
       break;
 
     case 'quick':
-      // Compounds max 3 sets, everything else max 2, remove isolations, short rest
       maxSetsCompound = 3;
       maxSetsOther = 2;
       dropIsolations = true;
-      skipAccessories = false; // keep accessories but at 2 sets max
       restMultiplier = Math.min(restMultiplier, 0.65);
-      message += ` · Quick session — stripped to essentials, short rest.`;
+      message += ' Quick session — stripped to essentials.';
       break;
   }
 
@@ -129,31 +148,30 @@ function computeAdjustments(input: MoodInput): MoodAdjustments {
     dropIsolations,
     maxSetsCompound,
     maxSetsOther,
-    message: message.trim().replace(/^· /, ''),
+    message: message.trim(),
     timeCategory,
   };
 }
 
+// ─── Exercise Adjustments ───────────────────────────────────────────────────────
+
 /**
- * Apply mood + time adjustments to exercises.
- * Returns a new array with exercises trimmed/modified to fit constraints.
+ * Apply mood + time adjustments to exercises (volume, RIR, rest).
+ * Does NOT handle exercise swaps — that's done separately by the agentic engine.
  */
 export function adjustExercises(
   exercises: BlockExercise[],
-  adjustments: MoodAdjustments
+  adjustments: MoodAdjustments,
 ): BlockExercise[] {
   return exercises
     .filter((be) => {
-      // Skip all non-anchor exercises if beat_up/very-low
       if (adjustments.skipAccessories && !be.is_anchor) return false;
-      // Drop isolations (slots 5+) for moderate/quick time
       if (adjustments.dropIsolations && !be.is_anchor && be.slot_order > 4) return false;
       return true;
     })
     .map((be) => {
       let sets = Math.max(1, Math.round(be.sets * adjustments.setsMultiplier));
 
-      // Apply max set caps for quick sessions
       if (be.is_anchor && adjustments.maxSetsCompound !== null) {
         sets = Math.min(sets, adjustments.maxSetsCompound);
       } else if (!be.is_anchor && adjustments.maxSetsOther !== null) {
@@ -170,8 +188,7 @@ export function adjustExercises(
 }
 
 /**
- * Given target time and exercises, iteratively trim until estimated time fits.
- * Returns the trimmed exercise list.
+ * Trim exercises to fit target time — iterative removal strategy.
  */
 export function trimToFitTime(
   exercises: BlockExercise[],
@@ -181,10 +198,9 @@ export function trimToFitTime(
   let result = adjustExercises(exercises, adjustments);
   let estimated = estimateWorkoutMinutes(result);
 
-  // If we're already under target, done
   if (estimated <= targetMinutes) return result;
 
-  // Step 1: Drop isolations (slot_order > 4, non-anchor) one by one from the end
+  // Step 1: Drop isolations (slot_order > 4) one by one from the end
   const isolationSlots = result
     .filter((e) => !e.is_anchor && e.slot_order > 4)
     .sort((a, b) => b.slot_order - a.slot_order);
@@ -195,21 +211,17 @@ export function trimToFitTime(
     if (estimated <= targetMinutes) return result;
   }
 
-  // Step 2: Reduce sets on accessories (non-anchor, slot_order <= 4)
+  // Step 2: Reduce accessory sets to 2
   result = result.map((e) => {
-    if (!e.is_anchor && e.sets > 2) {
-      return { ...e, sets: 2 };
-    }
+    if (!e.is_anchor && e.sets > 2) return { ...e, sets: 2 };
     return e;
   });
   estimated = estimateWorkoutMinutes(result);
   if (estimated <= targetMinutes) return result;
 
-  // Step 3: Reduce compound sets
+  // Step 3: Reduce compound sets to 3
   result = result.map((e) => {
-    if (e.is_anchor && e.sets > 3) {
-      return { ...e, sets: 3 };
-    }
+    if (e.is_anchor && e.sets > 3) return { ...e, sets: 3 };
     return e;
   });
   estimated = estimateWorkoutMinutes(result);
@@ -227,24 +239,151 @@ export function trimToFitTime(
   }
 
   // Step 5: Last resort — cap all sets at 2
-  result = result.map((e) => ({
-    ...e,
-    sets: Math.min(e.sets, 2),
-  }));
+  result = result.map((e) => ({ ...e, sets: Math.min(e.sets, 2) }));
 
   return result;
 }
+
+// ─── Agentic Exercise Swap Engine ───────────────────────────────────────────────
+
+/**
+ * For low_energy mood: query Supabase for easier alternatives within
+ * the same movement pool. Returns swap recommendations.
+ */
+async function findEasierAlternatives(
+  exercises: BlockExercise[],
+  currentExerciseIds: string[],
+): Promise<ExerciseSwap[]> {
+  const swaps: ExerciseSwap[] = [];
+
+  // Get details for all current exercises (need name + difficulty + movement_pool)
+  const { data: currentDetails } = await supabase
+    .from('exercises')
+    .select('id, name, difficulty, movement_pool, is_compound')
+    .in('id', currentExerciseIds);
+
+  if (!currentDetails || currentDetails.length === 0) return swaps;
+
+  // For each non-anchor exercise that's intermediate/expert, find an easier alternative
+  for (const be of exercises) {
+    if (be.is_anchor) continue; // Never swap anchor lifts
+
+    const detail = currentDetails.find((d) => d.id === be.exercise_id);
+    if (!detail) continue;
+
+    const currentRank = DIFFICULTY_RANK[detail.difficulty ?? 'intermediate'] ?? 2;
+    if (currentRank <= 1) continue; // Already beginner, nothing easier
+
+    // Query for easier exercises in same movement pool
+    const { data: alternatives } = await supabase
+      .from('exercises')
+      .select('id, name, difficulty, movement_pool')
+      .eq('movement_pool', detail.movement_pool)
+      .neq('id', detail.id)
+      .not('id', 'in', `(${currentExerciseIds.join(',')})`)
+      .in('difficulty', currentRank >= 3 ? ['beginner', 'intermediate'] : ['beginner'])
+      .limit(5);
+
+    if (!alternatives || alternatives.length === 0) continue;
+
+    // Pick the best alternative — prefer beginner, then intermediate
+    const sorted = alternatives.sort((a, b) => {
+      const rankA = DIFFICULTY_RANK[a.difficulty ?? 'intermediate'] ?? 2;
+      const rankB = DIFFICULTY_RANK[b.difficulty ?? 'intermediate'] ?? 2;
+      return rankA - rankB;
+    });
+
+    const pick = sorted[0];
+    swaps.push({
+      originalId: detail.id,
+      originalName: detail.name,
+      newId: pick.id,
+      newName: pick.name,
+      reason: `Swapped ${detail.name} (${detail.difficulty ?? 'intermediate'}) → ${pick.name} (${pick.difficulty ?? 'beginner'}) — easier on a low energy day`,
+    });
+  }
+
+  return swaps;
+}
+
+// ─── Main Hook ──────────────────────────────────────────────────────────────────
 
 export function useMoodAdjustment() {
   const { user } = useAuth();
   const [moodInput, setMoodInput] = useState<MoodInput | null>(null);
   const [adjustments, setAdjustments] = useState<MoodAdjustments | null>(null);
+  const [decision, setDecision] = useState<MoodDecision | null>(null);
+  const [adapting, setAdapting] = useState(false);
 
-  const submitMood = useCallback((input: MoodInput) => {
+  /**
+   * Submit mood and run the full agentic decision engine.
+   * For low_energy: queries DB for easier exercise alternatives.
+   * For all moods: computes volume/RIR/rest adjustments.
+   */
+  const submitMood = useCallback(async (
+    input: MoodInput,
+    exercises?: BlockExercise[],
+  ): Promise<MoodDecision> => {
     setMoodInput(input);
+    setAdapting(true);
+
     const adj = computeAdjustments(input);
     setAdjustments(adj);
-    return adj;
+
+    const reasoning: string[] = [];
+    let swaps: ExerciseSwap[] = [];
+
+    // ── Mood reasoning ──
+    switch (input.preMood) {
+      case 'energized':
+        reasoning.push('🔥 You\'re fired up — dropping RIR by 1. Push for PRs today.');
+        break;
+      case 'normal':
+        reasoning.push('✊ Normal day — running the program as designed.');
+        break;
+      case 'low_energy':
+        reasoning.push('🔋 Low energy detected — finding easier exercise alternatives.');
+        if (exercises && exercises.length > 0) {
+          const ids = exercises.map((e) => e.exercise_id);
+          swaps = await findEasierAlternatives(exercises, ids);
+          if (swaps.length > 0) {
+            reasoning.push(`🔄 Swapped ${swaps.length} exercise${swaps.length > 1 ? 's' : ''} to easier variants.`);
+            for (const s of swaps) {
+              reasoning.push(`  → ${s.reason}`);
+            }
+          } else {
+            reasoning.push('No easier alternatives found — keeping current exercises with higher RIR.');
+          }
+        }
+        reasoning.push('⬆️ RIR +1 across the board. Longer rest periods.');
+        break;
+    }
+
+    // ── Time reasoning ──
+    switch (adj.timeCategory) {
+      case 'moderate':
+        reasoning.push(`⏱️ ${input.timeAvailableMinutes}min window — dropping isolation work, tighter rest.`);
+        break;
+      case 'quick':
+        reasoning.push(`⚡ Only ${input.timeAvailableMinutes}min — compounds max 3 sets, accessories max 2. Let's move.`);
+        break;
+      default:
+        reasoning.push(`⏱️ ${input.timeAvailableMinutes}min — plenty of time for a full session.`);
+    }
+
+    const spotify = SPOTIFY_CONFIG[input.preMood];
+
+    const fullDecision: MoodDecision = {
+      adjustments: adj,
+      swaps,
+      reasoning,
+      spotifyGenre: spotify.genre,
+      spotifySearchQuery: spotify.searchQuery,
+    };
+
+    setDecision(fullDecision);
+    setAdapting(false);
+    return fullDecision;
   }, []);
 
   const saveMoodToSession = useCallback(async (sessionId: string) => {
@@ -263,11 +402,14 @@ export function useMoodAdjustment() {
   const resetMood = useCallback(() => {
     setMoodInput(null);
     setAdjustments(null);
+    setDecision(null);
   }, []);
 
   return {
     moodInput,
     adjustments,
+    decision,
+    adapting,
     submitMood,
     saveMoodToSession,
     resetMood,
