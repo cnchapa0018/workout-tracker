@@ -103,20 +103,26 @@ function computeAdjustments(input: MoodInput): MoodAdjustments {
   let message = '';
 
   // ── Mood-based adjustments ──
+  //  Energized  → full program as written
+  //  Normal     → moderate reduction
+  //  Low Energy → minimum effective dose
   switch (preMood) {
     case 'energized':
-      rirAdjustment = -1; // Push harder, lower RIR
-      message = 'Feeling great — pushing intensity. RIR -1 on everything.';
+      // Program as designed — no adjustments
+      message = 'Feeling great — running the full program as written.';
       break;
 
     case 'normal':
-      message = 'Running the program as written.';
+      rirAdjustment = 1;       // +1 RIR, stay further from failure
+      setsMultiplier = 0.85;   // ~15% volume reduction
+      message = 'Normal day — slightly reduced intensity and volume.';
       break;
 
     case 'low_energy':
-      rirAdjustment = 1; // More reps in reserve
-      restMultiplier = 1.25; // Longer rest
-      message = 'Low energy — swapping to easier exercises, higher RIR.';
+      rirAdjustment = 2;       // +2 RIR, well away from failure
+      setsMultiplier = 0.7;    // ~30% volume reduction
+      restMultiplier = 1.3;    // Longer rest between sets
+      message = 'Low energy — reduced volume, higher RIR, easier exercises.';
       break;
   }
 
@@ -336,13 +342,13 @@ export function useMoodAdjustment() {
     // ── Mood reasoning ──
     switch (input.preMood) {
       case 'energized':
-        reasoning.push('🔥 You\'re fired up — dropping RIR by 1. Push for PRs today.');
+        reasoning.push('🔥 Feeling energized — running the full program as written.');
         break;
       case 'normal':
-        reasoning.push('✊ Normal day — running the program as designed.');
+        reasoning.push('✊ Normal day — reducing intensity slightly. RIR +1, ~15% less volume.');
         break;
       case 'low_energy':
-        reasoning.push('🔋 Low energy detected — finding easier exercise alternatives.');
+        reasoning.push('🔋 Low energy — minimum effective dose. RIR +2, ~30% less volume.');
         if (exercises && exercises.length > 0) {
           const ids = exercises.map((e) => e.exercise_id);
           swaps = await findEasierAlternatives(exercises, ids);
@@ -355,7 +361,7 @@ export function useMoodAdjustment() {
             reasoning.push('No easier alternatives found — keeping current exercises with higher RIR.');
           }
         }
-        reasoning.push('⬆️ RIR +1 across the board. Longer rest periods.');
+        reasoning.push('⬆️ Longer rest periods. Focus on movement quality over intensity.');
         break;
     }
 

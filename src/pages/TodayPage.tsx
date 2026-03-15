@@ -73,8 +73,15 @@ export default function TodayPage() {
   const totalWeeks = activeBlock?.total_weeks ?? (profile?.weeks_between_deloads ? profile.weeks_between_deloads + 1 : 7);
   const startingRir = profile?.starting_rir ?? 2;
 
-  const [selectedDay, setSelectedDay] = useState<DayTemplate>(dayOrder[0] ?? 'upper_a');
-  const [weekNumber, setWeekNumber] = useState(1);
+  const [selectedDay, setSelectedDay] = useState<DayTemplate>(() => {
+    const saved = sessionStorage.getItem('workin_selectedDay');
+    return (saved && dayOrder.includes(saved as DayTemplate) ? saved as DayTemplate : dayOrder[0]) ?? 'upper_a';
+  });
+  const [weekNumber, setWeekNumber] = useState(() => {
+    const saved = sessionStorage.getItem('workin_weekNumber');
+    return saved ? parseInt(saved, 10) : 1;
+  });
+  const [inlineMood, setInlineMood] = useState<PreMood | null>(null);
   const [expandedExercise, setExpandedExercise] = useState<string | null>(null);
   const [showRecovery, setShowRecovery] = useState(false);
   const [swapTarget, setSwapTarget] = useState<BlockExerciseWithDetails | null>(null);
@@ -158,6 +165,14 @@ export default function TodayPage() {
     return estimateWorkoutMinutes(original as unknown as BlockExercise[]);
   }, [blockExercises, selectedDay]);
 
+  // Persist UI state to sessionStorage so tab restore doesn't lose context
+  useEffect(() => {
+    sessionStorage.setItem('workin_selectedDay', selectedDay);
+  }, [selectedDay]);
+  useEffect(() => {
+    sessionStorage.setItem('workin_weekNumber', String(weekNumber));
+  }, [weekNumber]);
+
   // Load progression hint when exercise is expanded during active session
   useEffect(() => {
     if (!expandedExercise || !todaySession || !user) return;
@@ -178,11 +193,6 @@ export default function TodayPage() {
     }
     return map;
   }, [sessionSets]);
-
-  const handleStartWorkout = useCallback(async () => {
-    // Show mood check before starting
-    setShowMoodCheck(true);
-  }, []);
 
   const handleMoodSubmit = useCallback(async (mood: PreMood, energy: number, timeMinutes: number) => {
     setShowMoodCheck(false);
@@ -224,6 +234,20 @@ export default function TodayPage() {
     }
     setStartingWorkout(false);
   }, [startWorkout, selectedDay, weekNumber, moodEngine, blockExercises]);
+
+  const handleStartWorkout = useCallback(async () => {
+    if (inlineMood) {
+      // Mood already selected inline — use default time from profile session duration
+      const defaultMinutes = profile?.session_duration
+        ? parseInt(profile.session_duration, 10) || 60
+        : 60;
+      const energyMap: Record<PreMood, number> = { energized: 5, normal: 3, low_energy: 1 };
+      await handleMoodSubmit(inlineMood, energyMap[inlineMood], defaultMinutes);
+    } else {
+      // No mood selected — show full mood check modal
+      setShowMoodCheck(true);
+    }
+  }, [inlineMood, profile?.session_duration, handleMoodSubmit]);
 
   const handleSkipMood = useCallback(async () => {
     setShowMoodCheck(false);
@@ -424,13 +448,38 @@ export default function TodayPage() {
             </div>
           )}
 
-          {/* Pre-workout mood prompt */}
-          <div className="bg-surface-2 border border-brand/20 rounded-xl p-4 space-y-2">
+          {/* Inline mood selector */}
+          <div className="bg-surface-2 border border-brand/20 rounded-xl p-4 space-y-3">
             <div className="flex items-center gap-2">
               <Sparkles size={16} className="text-brand" />
               <p className="text-foreground text-sm font-medium">How are you feeling?</p>
             </div>
             <p className="text-faint text-xs">I&apos;ll adapt exercises, volume, and intensity to match your energy and time.</p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: 'energized' as PreMood, label: 'Energized', icon: Flame, color: 'text-orange-400', bg: 'bg-orange-500/15', border: 'border-orange-500/40 ring-orange-500/20', desc: 'Full program' },
+                { value: 'normal' as PreMood, label: 'Normal', icon: Activity, color: 'text-blue-400', bg: 'bg-blue-500/15', border: 'border-blue-500/40 ring-blue-500/20', desc: 'Lighter intensity' },
+                { value: 'low_energy' as PreMood, label: 'Low Energy', icon: BatteryLow, color: 'text-yellow-400', bg: 'bg-yellow-500/15', border: 'border-yellow-500/40 ring-yellow-500/20', desc: 'Minimum dose' },
+              ].map((opt) => {
+                const Icon = opt.icon;
+                const isActive = inlineMood === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => setInlineMood(isActive ? null : opt.value)}
+                    className={`flex flex-col items-center gap-1.5 p-3 min-h-11 rounded-xl border transition-all ${
+                      isActive
+                        ? `${opt.bg} ${opt.border} ring-1`
+                        : 'bg-surface-3 border-border-2 hover:border-neutral-600'
+                    }`}
+                  >
+                    <Icon size={22} className={isActive ? opt.color : 'text-faint'} />
+                    <span className={`text-xs font-semibold ${isActive ? 'text-foreground' : 'text-secondary'}`}>{opt.label}</span>
+                    <span className={`text-[10px] leading-tight ${isActive ? opt.color : 'text-faint'}`}>{opt.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Start workout button */}

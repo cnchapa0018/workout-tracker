@@ -11,7 +11,7 @@
  * asset URLs, so old un-hashed entries are pruned on activate.
  */
 
-const CACHE_NAME = 'workin-v2';
+const CACHE_NAME = 'workin-v3';
 
 // ── Install ────────────────────────────────────────────────────────
 self.addEventListener('install', () => {
@@ -67,18 +67,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2) Navigation (HTML pages) — Network-first
-  //    This is the KEY fix: always try the network so new deploys load
-  //    without clearing cache. Fall back to cache only when offline.
+  // 2) Navigation (HTML pages) — Stale-while-revalidate
+  //    Serve cached HTML instantly (prevents reload flash when returning
+  //    to a background tab), then update the cache in the background.
+  //    New deploys take effect on next visit.
   if (isNavigationRequest(request)) {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          return response;
-        })
-        .catch(() => caches.match(request).then((cached) => cached ?? caches.match('/')))
+      caches.match(request).then((cached) => {
+        const networkFetch = fetch(request)
+          .then((response) => {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+            return response;
+          })
+          .catch(() => cached ?? caches.match('/'));
+        return cached ?? networkFetch;
+      }),
     );
     return;
   }
