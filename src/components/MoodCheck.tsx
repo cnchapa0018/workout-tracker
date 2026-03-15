@@ -24,8 +24,8 @@ const MOOD_OPTIONS: Array<{
     color: 'text-orange-400',
     bg: 'bg-orange-500/15',
     border: 'border-orange-500/40 ring-orange-500/30',
-    desc: 'Push harder today',
-    detail: 'Lower RIR, full volume — time to chase PRs.',
+    desc: 'Full program as written',
+    detail: 'No adjustments — you\'re ready to go.',
   },
   {
     value: 'normal',
@@ -34,8 +34,8 @@ const MOOD_OPTIONS: Array<{
     color: 'text-blue-400',
     bg: 'bg-blue-500/15',
     border: 'border-blue-500/40 ring-blue-500/30',
-    desc: 'Run the program',
-    detail: 'Standard intensity, programmed volume.',
+    desc: 'Lighter intensity',
+    detail: 'RIR +1, slight volume reduction. Solid work.',
   },
   {
     value: 'low_energy',
@@ -44,8 +44,8 @@ const MOOD_OPTIONS: Array<{
     color: 'text-yellow-400',
     bg: 'bg-yellow-500/15',
     border: 'border-yellow-500/40 ring-yellow-500/30',
-    desc: 'Swap to easier lifts',
-    detail: 'Same muscle groups, easier exercises. Still get the work done.',
+    desc: 'Minimum effective dose',
+    detail: 'Easier exercises, less volume, longer rest. Still productive.',
   },
 ];
 
