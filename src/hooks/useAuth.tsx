@@ -16,23 +16,46 @@ interface AuthContextValue {
   refreshProfile: () => Promise<void>;
 }
 
+const PROFILE_CACHE_KEY = 'workin_profile_cache';
+
+function getCachedProfile(): UserProfile | null {
+  try {
+    const raw = sessionStorage.getItem(PROFILE_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as UserProfile) : null;
+  } catch { return null; }
+}
+
+function setCachedProfile(profile: UserProfile | null) {
+  try {
+    if (profile) sessionStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile));
+    else sessionStorage.removeItem(PROFILE_CACHE_KEY);
+  } catch { /* quota exceeded — ignore */ }
+}
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [profileLoading, setProfileLoading] = useState(true);
+  // Hydrate profile from sessionStorage cache so the UI shows instantly
+  const cached = getCachedProfile();
+  const [profile, setProfile] = useState<UserProfile | null>(cached);
+  // If we have a cached profile, skip both loading gates entirely —
+  // the fresh fetch will update state in the background.
+  const [loading, setLoading] = useState(!cached);
+  const [profileLoading, setProfileLoading] = useState(!cached);
 
   const fetchProfile = useCallback(async (userId: string) => {
-    setProfileLoading(true);
+    // Only show profileLoading spinner if there's no cached profile
+    if (!getCachedProfile()) setProfileLoading(true);
     const { data } = await supabase
       .from('user_profiles')
       .select('*')
       .eq('id', userId)
       .maybeSingle();
-    setProfile(data as unknown as UserProfile | null);
+    const p = data as unknown as UserProfile | null;
+    setProfile(p);
+    setCachedProfile(p);
     setProfileLoading(false);
   }, []);
 
@@ -52,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) fetchProfile(s.user.id);
-      else { setProfile(null); setProfileLoading(false); }
+      else { setProfile(null); setCachedProfile(null); setProfileLoading(false); }
       setLoading(false);
     });
 
@@ -84,6 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     await supabase.auth.signOut();
     setProfile(null);
+    setCachedProfile(null);
     setProfileLoading(false);
   };
 
