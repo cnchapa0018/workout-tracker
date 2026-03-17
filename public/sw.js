@@ -11,7 +11,7 @@
  * asset URLs, so old un-hashed entries are pruned on activate.
  */
 
-const CACHE_NAME = 'workin-v3';
+const CACHE_NAME = 'workin-v5';
 
 // ── Install ────────────────────────────────────────────────────────
 self.addEventListener('install', () => {
@@ -60,10 +60,19 @@ function isHashedAsset(url) {
 // ── Fetch ──────────────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+  const url = new URL(request.url);
+
+  // 0) Only handle http(s) — skip chrome-extension://, data:, etc.
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
 
   // 1) API / Supabase — always network, never cache
   if (isApiOrAuth(request.url)) {
-    event.respondWith(fetch(request));
+    event.respondWith(
+      fetch(request).catch(() => new Response(JSON.stringify({ error: 'Network unavailable' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      })),
+    );
     return;
   }
 
@@ -93,11 +102,13 @@ self.addEventListener('fetch', (event) => {
       caches.match(request).then(
         (cached) =>
           cached ??
-          fetch(request).then((response) => {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-            return response;
-          }),
+          fetch(request)
+            .then((response) => {
+              const clone = response.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+              return response;
+            })
+            .catch(() => caches.match('/')),
       ),
     );
     return;
@@ -106,11 +117,13 @@ self.addEventListener('fetch', (event) => {
   // 4) Everything else — Stale-while-revalidate
   event.respondWith(
     caches.match(request).then((cached) => {
-      const networkFetch = fetch(request).then((response) => {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-        return response;
-      });
+      const networkFetch = fetch(request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          return response;
+        })
+        .catch(() => cached ?? caches.match('/'));
       return cached ?? networkFetch;
     }),
   );
