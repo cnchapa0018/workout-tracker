@@ -89,13 +89,9 @@ function normalizeTracks(tracks: SpotifyTrack[]): NormalizedTrack[] {
 
 async function searchTracks(accessToken: string, mood: string): Promise<NormalizedTrack[]> {
   const query = MOOD_SEARCH_QUERIES[mood] ?? MOOD_SEARCH_QUERIES['steady'];
-  const params = new URLSearchParams({
-    q: query,
-    type: 'track',
-    limit: '20',
-  });
+  const searchUrl = `${SPOTIFY_API_BASE}/search?q=${encodeURIComponent(query)}&type=track&market=US&limit=20`;
 
-  const searchRes = await fetch(`${SPOTIFY_API_BASE}/search?${params.toString()}`, {
+  const searchRes = await fetch(searchUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
