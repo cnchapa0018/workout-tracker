@@ -57,13 +57,16 @@ export function ScienceTooltip({ term, children }: ScienceTooltipProps) {
 
   return (
     <span className="relative inline-flex items-center" ref={ref}>
-      <button
+      <span
+        role="button"
+        tabIndex={0}
         onClick={() => setShow(!show)}
-        className="inline-flex items-center gap-0.5 text-brand/70 hover:text-brand transition-colors"
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShow(!show); } }}
+        className="inline-flex items-center gap-0.5 text-brand/70 hover:text-brand transition-colors cursor-pointer"
       >
         {children}
         <Info size={12} className="shrink-0" />
-      </button>
+      </span>
 
       {show && (
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 z-50">

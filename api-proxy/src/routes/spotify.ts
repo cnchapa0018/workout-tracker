@@ -46,6 +46,12 @@ interface RecommendationsResponse {
   tracks: SpotifyTrack[];
 }
 
+interface SearchTracksResponse {
+  tracks: {
+    items: SpotifyTrack[];
+  };
+}
+
 interface NormalizedTrack {
   id: string;
   uri: string;
@@ -56,6 +62,51 @@ interface NormalizedTrack {
   spotifyUrl: string;
   previewUrl: string | null;
   durationMs: number;
+}
+
+const MOOD_SEARCH_QUERIES: Record<string, string> = {
+  fired_up: 'intense gym workout heavy bass',
+  elevate: 'high energy gym motivation pump up',
+  boost: 'uplifting workout energy boost hype',
+  steady: 'high energy gym motivation pump up',
+  low: 'uplifting workout energy boost hype',
+  beat_up: 'chill recovery stretching ambient',
+};
+
+function normalizeTracks(tracks: SpotifyTrack[]): NormalizedTrack[] {
+  return tracks.map((t) => ({
+    id: t.id,
+    uri: `spotify:track:${t.id}`,
+    name: t.name,
+    artist: t.artists.map((a) => a.name).join(', '),
+    album: t.album.name,
+    albumArt: t.album.images[1]?.url ?? t.album.images[0]?.url ?? '',
+    spotifyUrl: t.external_urls.spotify,
+    previewUrl: t.preview_url,
+    durationMs: t.duration_ms,
+  }));
+}
+
+async function searchTracks(accessToken: string, mood: string): Promise<NormalizedTrack[]> {
+  const query = MOOD_SEARCH_QUERIES[mood] ?? MOOD_SEARCH_QUERIES['steady'];
+  const params = new URLSearchParams({
+    q: query,
+    type: 'track',
+    limit: '20',
+  });
+
+  const searchRes = await fetch(`${SPOTIFY_API_BASE}/search?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!searchRes.ok) {
+    const errText = await searchRes.text();
+    console.error('[spotify/search] API error:', searchRes.status, errText);
+    throw new Error(`search_failed_${searchRes.status}`);
+  }
+
+  const searchData = (await searchRes.json()) as SearchTracksResponse;
+  return normalizeTracks(searchData.tracks.items);
 }
 
 // Allowed redirect URIs — must match what's registered in the Spotify Dashboard
@@ -287,23 +338,21 @@ spotifyRouter.get('/recommendations', async (req: Request, res: Response) => {
         res.status(401).json({ error: 'Token expired', needsRefresh: true });
         return;
       }
-      res.status(recRes.status).json({ error: 'Spotify API error' });
-      return;
+
+      try {
+        const fallbackTracks = await searchTracks(accessToken, mood);
+        res.json({ tracks: fallbackTracks, mood, fallback: 'search' });
+        return;
+      } catch (fallbackErr) {
+        console.error('[spotify/recommendations] fallback failed:', fallbackErr);
+        res.status(recRes.status).json({ error: 'Spotify API error' });
+        return;
+      }
     }
 
     const data = (await recRes.json()) as RecommendationsResponse;
 
-    const tracks: NormalizedTrack[] = data.tracks.map((t) => ({
-      id: t.id,
-      uri: `spotify:track:${t.id}`,
-      name: t.name,
-      artist: t.artists.map((a) => a.name).join(', '),
-      album: t.album.name,
-      albumArt: t.album.images[1]?.url ?? t.album.images[0]?.url ?? '',
-      spotifyUrl: t.external_urls.spotify,
-      previewUrl: t.preview_url,
-      durationMs: t.duration_ms,
-    }));
+    const tracks = normalizeTracks(data.tracks);
 
     res.json({ tracks, mood });
   } catch (err) {

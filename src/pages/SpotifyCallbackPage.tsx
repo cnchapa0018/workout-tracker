@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { useSpotify } from '../hooks/useSpotify';
@@ -8,8 +8,13 @@ export default function SpotifyCallbackPage() {
   const { handleCallback } = useSpotify();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [errorMsg, setErrorMsg] = useState('');
+  const calledRef = useRef(false);
 
   useEffect(() => {
+    // Guard against StrictMode double-fire — Spotify codes are single-use
+    if (calledRef.current) return;
+    calledRef.current = true;
+
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     const error = params.get('error');
