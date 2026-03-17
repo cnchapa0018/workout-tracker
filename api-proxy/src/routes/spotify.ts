@@ -89,20 +89,33 @@ function normalizeTracks(tracks: SpotifyTrack[]): NormalizedTrack[] {
 
 async function searchTracks(accessToken: string, mood: string): Promise<NormalizedTrack[]> {
   const query = MOOD_SEARCH_QUERIES[mood] ?? MOOD_SEARCH_QUERIES['steady'];
-  const searchUrl = `${SPOTIFY_API_BASE}/search?q=${encodeURIComponent(query)}&type=track&market=US&limit=20`;
+  // Spotify dev-mode apps cap search limit at 10; fetch two pages for variety
+  const PAGE_LIMIT = 10;
+  const headers = { Authorization: `Bearer ${accessToken}` };
 
-  const searchRes = await fetch(searchUrl, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const page1Url = `${SPOTIFY_API_BASE}/search?q=${encodeURIComponent(query)}&type=track&market=US&limit=${PAGE_LIMIT}&offset=0`;
+  const page1Res = await fetch(page1Url, { headers });
+  if (!page1Res.ok) {
+    const errText = await page1Res.text();
+    console.error('[spotify/search] API error:', page1Res.status, errText);
+    throw new Error(`search_failed_${page1Res.status}`);
+  }
+  const page1Data = (await page1Res.json()) as SearchTracksResponse;
+  const tracks = page1Data.tracks.items;
 
-  if (!searchRes.ok) {
-    const errText = await searchRes.text();
-    console.error('[spotify/search] API error:', searchRes.status, errText);
-    throw new Error(`search_failed_${searchRes.status}`);
+  // Best-effort second page — don't fail the whole request if it errors
+  try {
+    const page2Url = `${SPOTIFY_API_BASE}/search?q=${encodeURIComponent(query)}&type=track&market=US&limit=${PAGE_LIMIT}&offset=${PAGE_LIMIT}`;
+    const page2Res = await fetch(page2Url, { headers });
+    if (page2Res.ok) {
+      const page2Data = (await page2Res.json()) as SearchTracksResponse;
+      tracks.push(...page2Data.tracks.items);
+    }
+  } catch {
+    // ignore — first page is enough
   }
 
-  const searchData = (await searchRes.json()) as SearchTracksResponse;
-  return normalizeTracks(searchData.tracks.items);
+  return normalizeTracks(tracks);
 }
 
 // Allowed redirect URIs — must match what's registered in the Spotify Dashboard
