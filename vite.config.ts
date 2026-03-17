@@ -7,6 +7,13 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 7000,
+    host: '127.0.0.1',
+    strictPort: true,
+    hmr: {
+      host: '127.0.0.1',
+      clientPort: 7000,
+      protocol: 'ws',
+    },
   },
   build: {
     rollupOptions: {

@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Play, CheckCircle, ChevronDown, ChevronUp, ArrowLeftRight, AlertTriangle, Loader2, Video, Info, Music, Flame, Activity, BatteryLow, Clock, Sparkles, ExternalLink, RotateCcw } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { Play, CheckCircle, ChevronDown, ChevronUp, ArrowLeftRight, AlertTriangle, Loader2, Video, Info, Flame, Activity, BatteryLow, Clock, Sparkles, RotateCcw } from 'lucide-react';
 import { useWorkout, type BlockExerciseWithDetails } from '../hooks/useWorkout';
 import { useAuth } from '../hooks/useAuth';
 import { useRestTimerContext } from '../context/RestTimerContext';
@@ -18,13 +18,14 @@ import { ScienceTooltip } from '../components/ScienceTooltip';
 import { CardioLogger } from '../components/CardioLogger';
 import { SpotifyMoodPlaylist, type SpotifyMood } from '../components/SpotifyMoodPlaylist';
 import { useSpotify } from '../hooks/useSpotify';
+import { useSpotifyPlayer } from '../hooks/useSpotifyPlayer';
 import { supabase } from '../lib/supabase';
 import type { RecoveryRating, DayTemplate, PreMood, BlockExercise, SplitType } from '../types/database';
 
 function preMoodToSpotifyMood(mood: PreMood | null | undefined): SpotifyMood {
   if (mood === 'energized') return 'fired_up';
-  if (mood === 'low_energy') return 'low';
-  return 'steady';
+  if (mood === 'low_energy') return 'boost';
+  return 'elevate';
 }
 
 const ALL_DAY_LABELS: Record<DayTemplate, string> = {
@@ -64,6 +65,11 @@ export default function TodayPage() {
   const microVar = useMicroVariation();
   const { checkProgression } = useProgression();
   const spotify = useSpotify();
+  const spotifyPlayer = useSpotifyPlayer({
+    getToken: spotify.getValidToken,
+    enabled: spotify.isConnected && !!todaySession,
+  });
+  const lastSpotifyRequestKey = useRef<string | null>(null);
 
   // Dynamic day order from profile split type
   const splitType = (profile?.split_type ?? 'upper_lower') as SplitType;
@@ -93,6 +99,7 @@ export default function TodayPage() {
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [progressionHints, setProgressionHints] = useState<Map<string, { shouldIncrease: boolean; suggestedWeight: number | null; stallCount: number; message: string }>>(new Map());
   const [swappedExerciseDetails, setSwappedExerciseDetails] = useState<Map<string, BlockExerciseWithDetails['exercise']>>(new Map());
+  const spotifyMood = preMoodToSpotifyMood(moodEngine.moodInput?.preMood);
 
   const dayExercises = useMemo(() => {
     let exercises = blockExercises
@@ -271,6 +278,25 @@ export default function TodayPage() {
     await fetchBlockExercises(activeBlock.id);
   }, [swapTarget, activeBlock, fetchBlockExercises]);
 
+  useEffect(() => {
+    if (!todaySession || !spotify.isConnected) {
+      lastSpotifyRequestKey.current = null;
+      return;
+    }
+
+    if (spotify.loadingTracks || spotify.tracks.length > 0) {
+      return;
+    }
+
+    const requestKey = `${todaySession.id}:${spotifyMood}`;
+    if (lastSpotifyRequestKey.current === requestKey) {
+      return;
+    }
+
+    lastSpotifyRequestKey.current = requestKey;
+    spotify.fetchRecommendations(spotifyMood);
+  }, [todaySession, spotify.isConnected, spotify.loadingTracks, spotify.tracks.length, spotifyMood, spotify.fetchRecommendations]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -352,47 +378,48 @@ export default function TodayPage() {
         </div>
       )}
 
-      {/* Mood indicator + Spotify during active session */}
-      {todaySession && (
-        <div className="flex items-center gap-2">
-          {moodEngine.moodInput && (
-            <div className="flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2 text-sm flex-1">
-              {moodEngine.moodInput.preMood === 'energized' && <Flame size={16} className="text-orange-400" />}
-              {moodEngine.moodInput.preMood === 'normal' && <Activity size={16} className="text-blue-400" />}
-              {moodEngine.moodInput.preMood === 'low_energy' && <BatteryLow size={16} className="text-yellow-400" />}
-              <span className="text-foreground font-medium capitalize">{moodEngine.moodInput.preMood?.replace('_', ' ')}</span>
+      {/* Mood indicator during active session */}
+      {todaySession && moodEngine.moodInput && (
+        <div className="flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2 text-sm">
+          {moodEngine.moodInput.preMood === 'energized' && <Flame size={16} className="text-orange-400" />}
+          {moodEngine.moodInput.preMood === 'normal' && <Activity size={16} className="text-blue-400" />}
+          {moodEngine.moodInput.preMood === 'low_energy' && <BatteryLow size={16} className="text-yellow-400" />}
+          <span className="text-foreground font-medium capitalize">
+            {moodEngine.moodInput.preMood === 'low_energy' ? 'Drained' : moodEngine.moodInput.preMood}
+          </span>
+          <span className="text-faint">·</span>
+          <Clock size={14} className="text-muted" />
+          <span className="text-muted">{moodEngine.moodInput.timeAvailableMinutes}m</span>
+          {moodEngine.decision && moodEngine.decision.swaps.length > 0 && (
+            <>
               <span className="text-faint">·</span>
-              <Clock size={14} className="text-muted" />
-              <span className="text-muted">{moodEngine.moodInput.timeAvailableMinutes}m</span>
-              {moodEngine.decision && moodEngine.decision.swaps.length > 0 && (
-                <>
-                  <span className="text-faint">·</span>
-                  <span className="text-brand text-xs">{moodEngine.decision.swaps.length} swap{moodEngine.decision.swaps.length > 1 ? 's' : ''}</span>
-                </>
-              )}
-            </div>
+              <span className="text-brand text-xs">{moodEngine.decision.swaps.length} swap{moodEngine.decision.swaps.length > 1 ? 's' : ''}</span>
+            </>
           )}
-          <a
-            href={moodEngine.decision
-              ? `spotify:search:${encodeURIComponent(moodEngine.decision.spotifySearchQuery)}`
-              : 'spotify:search:workout%20motivation'
-            }
-            className="flex items-center gap-2 bg-[#1DB954]/15 text-[#1DB954] rounded-xl px-3 py-2 text-sm font-medium hover:bg-[#1DB954]/25 transition-colors shrink-0"
-          >
-            <Music size={16} />
-            <ExternalLink size={12} />
-          </a>
         </div>
       )}
 
       {/* Spotify Mood Playlist */}
-      {todaySession && spotify.isConnected && (spotify.tracks.length > 0 || spotify.loadingTracks) && (
+      {todaySession && spotify.isConnected && (
         <SpotifyMoodPlaylist
           tracks={spotify.tracks}
-          mood={preMoodToSpotifyMood(moodEngine.moodInput?.preMood)}
+          mood={spotifyMood}
           loading={spotify.loadingTracks}
           error={spotify.error}
           onRefresh={spotify.fetchRecommendations}
+          playerReady={spotifyPlayer.sdkReady && !!spotifyPlayer.deviceId}
+          playerError={spotifyPlayer.error}
+          premiumRequired={spotifyPlayer.premiumRequired}
+          currentTrack={spotifyPlayer.currentTrack}
+          isPlaying={spotifyPlayer.isPlaying}
+          position={spotifyPlayer.position}
+          duration={spotifyPlayer.duration}
+          onPlay={spotifyPlayer.play}
+          onTogglePlay={spotifyPlayer.togglePlay}
+          onNext={spotifyPlayer.nextTrack}
+          onPrevious={spotifyPlayer.previousTrack}
+          onSeek={spotifyPlayer.seek}
+          onSetVolume={spotifyPlayer.setVolume}
         />
       )}
 
@@ -453,7 +480,7 @@ export default function TodayPage() {
               {[
                 { value: 'energized' as PreMood, label: 'Energized', icon: Flame, color: 'text-orange-400', bg: 'bg-orange-500/15', border: 'border-orange-500/40 ring-orange-500/20', desc: 'Full program' },
                 { value: 'normal' as PreMood, label: 'Normal', icon: Activity, color: 'text-blue-400', bg: 'bg-blue-500/15', border: 'border-blue-500/40 ring-blue-500/20', desc: 'Lighter intensity' },
-                { value: 'low_energy' as PreMood, label: 'Low Energy', icon: BatteryLow, color: 'text-yellow-400', bg: 'bg-yellow-500/15', border: 'border-yellow-500/40 ring-yellow-500/20', desc: 'Minimum dose' },
+                { value: 'low_energy' as PreMood, label: 'Drained', icon: BatteryLow, color: 'text-yellow-400', bg: 'bg-yellow-500/15', border: 'border-yellow-500/40 ring-yellow-500/20', desc: 'Running on empty' },
               ].map((opt) => {
                 const Icon = opt.icon;
                 const isActive = inlineMood === opt.value;
@@ -501,9 +528,17 @@ export default function TodayPage() {
           return (
             <div key={be.id} className="bg-surface-2 rounded-xl overflow-hidden">
               {/* Exercise header */}
-              <button
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => setExpandedExercise(isExpanded ? null : be.id)}
-                className="w-full flex items-center justify-between p-4 min-h-11"
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setExpandedExercise(isExpanded ? null : be.id);
+                  }
+                }}
+                className="w-full flex items-center justify-between p-4 min-h-11 cursor-pointer"
               >
                 <div className="text-left flex-1">
                   <div className="flex items-center gap-2">
@@ -542,7 +577,7 @@ export default function TodayPage() {
                   </button>
                   {isExpanded ? <ChevronUp size={18} className="text-faint" /> : <ChevronDown size={18} className="text-faint" />}
                 </div>
-              </button>
+              </div>
 
               {/* Expanded set loggers */}
               {isExpanded && todaySession && (
