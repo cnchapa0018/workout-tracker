@@ -1,11 +1,11 @@
 {
-  "name": "WorkIn.ai",
-  "short_name": "WorkIn",
-  "description": "It's not a workout. It's a WorkIN — training with INsights from AI.",
+  "name": "WorkIN",
+  "short_name": "WorkIN",
+  "description": "A Healthy Way of Life — training, recovery and nourishment with INsights from AI.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0a0a",
-  "theme_color": "#FF6B35",
+  "background_color": "#F1ECE3",
+  "theme_color": "#F1ECE3",
   "orientation": "portrait",
   "icons": [
     {
@@ -18,6 +18,12 @@
       "src": "/icons/icon-512.svg",
       "sizes": "512x512",
       "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]
