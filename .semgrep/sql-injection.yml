@@ -1,0 +1,46 @@
+# Custom Semgrep rules for the "SQL Injection Detection" CI job.
+#
+# This codebase talks to Postgres exclusively through the Supabase PostgREST
+# query builder (supabase.from(...).select().eq(...)), which parameterizes every
+# value — so today there is no raw-SQL surface and these rules find nothing.
+# They exist as a guard rail: if anyone later introduces a raw DB driver or
+# string-built query, the security-scan workflow fails the PR.
+rules:
+  - id: raw-sql-string-interpolation
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      Possible SQL injection: a query is built with string concatenation or
+      template-literal interpolation of a variable. Use parameterized queries
+      or the Supabase query builder (.from().select().eq()) instead.
+    metadata:
+      category: security
+      cwe: "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"
+      owasp: "A03:2021 - Injection"
+      references:
+        - https://supabase.com/docs/guides/database/postgres/row-level-security
+    patterns:
+      - pattern-either:
+          - pattern: $DB.query(`...${$X}...`)
+          - pattern: $DB.query("..." + $X)
+          - pattern: $DB.query($A + $B)
+          - pattern: $DB.raw(`...${$X}...`)
+          - pattern: $DB.unsafe(`...${$X}...`)
+          - pattern: $DB.unsafe("..." + $X)
+          - pattern: $CLIENT.rpc(`...${$X}...`)
+
+  - id: supabase-rpc-dynamic-name
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: >
+      Dynamic Supabase RPC function name. Confirm the function name is a fixed
+      string and never derived from user input.
+    metadata:
+      category: security
+      cwe: "CWE-89"
+    patterns:
+      - pattern: $S.rpc($NAME, ...)
+      - metavariable-pattern:
+          metavariable: $NAME
+          patterns:
+            - pattern-not-regex: ^['"`]

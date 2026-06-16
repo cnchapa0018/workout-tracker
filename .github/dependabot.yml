@@ -1,0 +1,36 @@
+# Keeps dependencies and GitHub Actions current (and patches known CVEs).
+# Action updates here are the practical counterpart to the "Actions pinning"
+# audit: Dependabot raises a PR whenever a pinned action has a newer release.
+version: 2
+updates:
+  # Frontend (root) npm dependencies
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+      production-dependencies:
+        dependency-type: production
+    labels:
+      - dependencies
+
+  # api-proxy npm dependencies
+  - package-ecosystem: npm
+    directory: '/api-proxy'
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - api-proxy
+
+  # GitHub Actions used in workflows
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+    labels:
+      - ci

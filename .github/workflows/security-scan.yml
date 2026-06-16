@@ -1,0 +1,269 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Security Scan
+#
+# Mirrors a typical security-gate pipeline, adapted to this stack
+# (TypeScript / JavaScript / SQL / Supabase — no Python, so no Bandit).
+#
+# POLICY: jobs are REPORT-ONLY by default — findings show up in the repo's
+#   Security → Code scanning tab and in each run's summary, but they do NOT
+#   block PRs. The exceptions, which DO fail the check, are:
+#     • Secret Scanning            (a leaked credential must block)
+#     • SQL Injection Detection    (raw-SQL patterns must block)
+#     • Container build            (the api-proxy image must build)
+#
+#   Dependency vulnerabilities are report-only here (this repo currently has open
+#   advisories — run `npm audit fix`); flip the gate in the dependency-scan job
+#   once they're cleared.
+#
+#   To make any report-only job blocking, remove its `continue-on-error: true`
+#   (or the trailing `|| true` / `|| echo warning`) and, for Semgrep, drop the
+#   `continue-on-error` so a finding fails the job.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Security Scan
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '37 4 * * 1' # weekly, Monday 04:37 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Static analysis (SAST) ────────────────────────────────────────────────
+  semgrep:
+    name: Semgrep SAST Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install semgrep
+      - name: Run Semgrep
+        continue-on-error: true # report-only
+        run: >
+          semgrep scan
+          --config p/typescript
+          --config p/react
+          --config p/javascript
+          --config p/owasp-top-ten
+          --config p/secrets
+          --sarif --output semgrep.sarif
+          --metrics off
+          --exclude dist --exclude node_modules --exclude 'supabase/.temp'
+      - name: Ensure SARIF exists
+        if: always()
+        run: |
+          if [ ! -s semgrep.sarif ]; then
+            echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[]}' > semgrep.sarif
+          fi
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  # ── Dependency vulnerabilities ────────────────────────────────────────────
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ['.', 'api-proxy']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: npm audit (full report)
+        working-directory: ${{ matrix.dir }}
+        run: |
+          {
+            echo "### npm audit — \`${{ matrix.dir }}\`"
+            echo '```'
+            npm audit 2>&1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Flag CRITICAL advisories (report-only)
+        working-directory: ${{ matrix.dir }}
+        # Report-only by default. To make critical advisories block PRs, replace
+        # the line below with:  run: npm audit --audit-level=critical
+        run: npm audit --audit-level=critical || echo "::warning::Critical advisories present in '${{ matrix.dir }}' — run 'npm audit fix'."
+
+  # ── Secret scanning (BLOCKING) ────────────────────────────────────────────
+  secret-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history so commit-level secrets are caught
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # NOTE: free for public repos and personal accounts. If you ever move
+          # this repo under a GitHub *organization*, add a GITLEAKS_LICENSE secret.
+
+  # ── SQL injection detection (BLOCKING) ────────────────────────────────────
+  sql-injection:
+    name: SQL Injection Detection
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install semgrep
+      - name: Scan for raw-SQL / injection patterns
+        run: >
+          semgrep scan
+          --config .semgrep/sql-injection.yml
+          --severity ERROR
+          --error
+          --sarif --output sqli.sarif
+          --metrics off
+          --exclude dist --exclude node_modules
+      - name: Ensure SARIF exists
+        if: always()
+        run: |
+          if [ ! -s sqli.sarif ]; then
+            echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[]}' > sqli.sarif
+          fi
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: sqli.sarif
+          category: sql-injection
+
+  # ── License compliance ────────────────────────────────────────────────────
+  license-check:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Check production dependency licenses
+        run: |
+          npx --yes license-checker-rseidelsohn \
+            --production --summary --excludePrivatePackages \
+            --onlyAllow "MIT;ISC;Apache-2.0;BSD-2-Clause;BSD-3-Clause;0BSD;CC0-1.0;CC-BY-4.0;CC-BY-3.0;Unlicense;MPL-2.0;Python-2.0;BlueOak-1.0.0;WTFPL" \
+            || echo "::warning::Disallowed or unknown licenses detected — review the output above."
+
+  # ── GitHub Actions hardening / pinning audit ──────────────────────────────
+  actions-audit:
+    name: GitHub Actions Hardening Audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install zizmor
+      - name: Audit workflows (report-only)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          zizmor --format sarif .github/workflows > zizmor.sarif || true
+          # Guarantee a valid SARIF document even if zizmor errored / found nothing.
+          if [ ! -s zizmor.sarif ]; then
+            echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[]}' > zizmor.sarif
+          fi
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: zizmor.sarif
+          category: zizmor
+
+  # ── SBOM + container build evidence ───────────────────────────────────────
+  sbom:
+    name: SBOM & Container Build Evidence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install deps (frontend)
+        run: npm ci
+      - name: Generate CycloneDX SBOM (frontend)
+        run: npx --yes @cyclonedx/cyclonedx-npm --output-file sbom-frontend.json
+      - name: Install deps (api-proxy)
+        working-directory: api-proxy
+        run: npm ci
+      - name: Generate CycloneDX SBOM (api-proxy)
+        working-directory: api-proxy
+        run: npx --yes @cyclonedx/cyclonedx-npm --output-file ../sbom-api-proxy.json
+      - name: Build api-proxy container (evidence only — no push)
+        # The Dockerfile COPYs `api-proxy/...`, so the build context must be the
+        # repo root with the Dockerfile referenced via -f.
+        run: docker build -t workin-api-proxy:ci -f api-proxy/Dockerfile .
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom-*.json
+          if-no-files-found: warn
+
+  # ── Aggregated summary ────────────────────────────────────────────────────
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - semgrep
+      - dependency-scan
+      - secret-scan
+      - sql-injection
+      - license-check
+      - actions-audit
+      - sbom
+    steps:
+      - name: Compose summary
+        run: |
+          {
+            echo "## 🔒 Security Scan Summary"
+            echo ""
+            echo "| Check | Result | Gate |"
+            echo "|---|---|---|"
+            echo "| Semgrep SAST                | ${{ needs.semgrep.result }}         | report |"
+            echo "| Dependency Vulnerabilities  | ${{ needs.dependency-scan.result }} | report |"
+            echo "| Secret Scanning             | ${{ needs.secret-scan.result }}     | blocking |"
+            echo "| SQL Injection Detection     | ${{ needs.sql-injection.result }}   | blocking |"
+            echo "| License Compliance          | ${{ needs.license-check.result }}   | report |"
+            echo "| Actions Hardening Audit     | ${{ needs.actions-audit.result }}   | report |"
+            echo "| SBOM & Container Build      | ${{ needs.sbom.result }}            | build blocks |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Fail if a blocking check failed
+        if: >
+          needs.secret-scan.result == 'failure' ||
+          needs.sql-injection.result == 'failure' ||
+          needs.sbom.result == 'failure'
+        run: |
+          echo "::error::A blocking security check failed — see the summary above." >&2
+          exit 1
