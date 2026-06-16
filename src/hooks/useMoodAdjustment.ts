@@ -96,7 +96,7 @@ function computeAdjustments(input: MoodInput): MoodAdjustments {
   let setsMultiplier = 1.0;
   let rirAdjustment = 0;
   let restMultiplier = 1.0;
-  let skipAccessories = false;
+  const skipAccessories = false;
   let dropIsolations = false;
   let maxSetsCompound: number | null = null;
   let maxSetsOther: number | null = null;

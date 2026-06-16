@@ -52,6 +52,15 @@ function withDefaults(r: Row): Row {
   return { ...r, id: r.id ?? uuid(), created_at: r.created_at ?? new Date().toISOString() };
 }
 
+// Order-comparison for unknown cell values: numeric when both are numbers,
+// otherwise lexicographic (correct for ISO date/timestamp strings).
+function cmp(a: unknown, b: unknown): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  const sa = String(a);
+  const sb = String(b);
+  return sa < sb ? -1 : sa > sb ? 1 : 0;
+}
+
 // ─── Seed helpers (used by guestSeed) ───────────────────────────────────────
 export function seedTable(name: string, rows: Row[]): void {
   loadDb()[name] = rows.map(withDefaults);
@@ -186,18 +195,18 @@ class GuestQuery implements PromiseLike<Result> {
 
   private passes(row: Row): boolean {
     return this.filters.every((f) => {
-      const v = row[f.col] as any;
+      const v = row[f.col];
       switch (f.kind) {
         case 'eq': return v === f.val;
         case 'neq': return v !== f.val;
-        case 'gt': return v > (f.val as any);
-        case 'gte': return v >= (f.val as any);
-        case 'lt': return v < (f.val as any);
-        case 'lte': return v <= (f.val as any);
+        case 'gt': return cmp(v, f.val) > 0;
+        case 'gte': return cmp(v, f.val) >= 0;
+        case 'lt': return cmp(v, f.val) < 0;
+        case 'lte': return cmp(v, f.val) <= 0;
         case 'in': return Array.isArray(f.val) && f.val.includes(v);
         case 'is': return f.val === null ? v === null || v === undefined : v === f.val;
         case 'contains':
-          return Array.isArray(v) && Array.isArray(f.val) && f.val.every((x) => (v as unknown[]).includes(x));
+          return Array.isArray(v) && Array.isArray(f.val) && f.val.every((x) => v.includes(x));
         case 'ilike':
           return String(v ?? '').toLowerCase().includes(String(f.val).replace(/%/g, '').toLowerCase());
         default: return true;
@@ -235,7 +244,7 @@ class GuestQuery implements PromiseLike<Result> {
         if (this.orderCol) {
           const c = this.orderCol;
           const dir = this.orderAsc ? 1 : -1;
-          rows = [...rows].sort((a, b) => (a[c] === b[c] ? 0 : (a[c] as any) > (b[c] as any) ? dir : -dir));
+          rows = [...rows].sort((a, b) => cmp(a[c], b[c]) * dir);
         }
         if (this.rangeFromTo) rows = rows.slice(this.rangeFromTo[0], this.rangeFromTo[1] + 1);
         if (this.limitN != null) rows = rows.slice(0, this.limitN);

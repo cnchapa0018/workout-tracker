@@ -57,7 +57,10 @@ export function classifyMotion(frames: PoseFrame[]): MotionGuess | null {
     if (e != null) elbowAngles.push(e);
     const sh = lm[LEFT_SHOULDER] ?? lm[RIGHT_SHOULDER];
     const hp = lm[LEFT_HIP] ?? lm[RIGHT_HIP];
-    if (sh && hp) (Math.abs(sh.x - hp.x) > Math.abs(sh.y - hp.y) ? (horiz += 1) : (vert += 1));
+    if (sh && hp) {
+      if (Math.abs(sh.x - hp.x) > Math.abs(sh.y - hp.y)) horiz += 1;
+      else vert += 1;
+    }
   }
 
   const range = (a: number[]) => (a.length ? Math.max(...a) - Math.min(...a) : 0);
