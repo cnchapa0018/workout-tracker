@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Camera, CameraOff, Play, Square, Check, X, Plus, Minus, ScanEye, Eye, EyeOff,
   ShieldCheck, AlertCircle, Loader2, Sparkles, Dumbbell, RotateCcw,
@@ -31,11 +31,26 @@ export default function CameraCoachPage() {
 
   useEffect(() => () => coach.stop(), []); // release camera on unmount
 
+  // Start the camera only AFTER consent flips true and the <video> has mounted.
+  // Previously start() was awaited synchronously from the button handler, which
+  // raced React's commit: videoRef.current was still null, so start() bailed early
+  // and the preview stayed black (no stream, no spinner, no error). Driving it from
+  // an effect guarantees the <video> exists. startCamera is a stable callback; the
+  // ref makes it fire exactly once, even under StrictMode's double-invoke.
+  const { start: startCamera } = coach;
+  const startedRef = useRef(false);
+  useEffect(() => {
+    if (consented && !startedRef.current) {
+      startedRef.current = true;
+      startCamera();
+    }
+  }, [consented, startCamera]);
+
   const meta = state.activeExercise ? EXERCISE_META[state.activeExercise] : null;
   const u = state.update;
   const repsShown = correctedReps ?? u?.reps ?? 0;
 
-  const beginCamera = async () => { setConsented(true); await coach.start(); };
+  const beginCamera = () => setConsented(true);
 
   const toggleAutoDetect = (on: boolean) => {
     coach.setAutoDetect(on);
@@ -96,20 +111,6 @@ export default function CameraCoachPage() {
     );
   }
 
-  // ── Camera error state ──
-  if (state.status === 'error') {
-    return (
-      <div className="p-4 pb-24 space-y-5">
-        <Header />
-        <div className="bg-surface-2 rounded-2xl p-5 space-y-3 text-center">
-          <CameraOff size={36} className="text-red-400 mx-auto" />
-          <p className="text-foreground font-medium">{CAMERA_ERROR_COPY[state.cameraError ?? 'unknown']}</p>
-          <button onClick={beginCamera} className="bg-brand text-white font-semibold rounded-xl px-5 py-2.5 min-h-11">Try Again</button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="p-4 pb-24 space-y-4">
       <Header />
@@ -153,6 +154,14 @@ export default function CameraCoachPage() {
         {state.status === 'starting' && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/50">
             <Loader2 size={28} className="text-brand animate-spin" />
+          </div>
+        )}
+
+        {state.status === 'error' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/75 px-6 text-center">
+            <CameraOff size={36} className="text-red-400" />
+            <p className="text-white font-medium">{CAMERA_ERROR_COPY[state.cameraError ?? 'unknown']}</p>
+            <button onClick={() => coach.start()} className="bg-brand text-white font-semibold rounded-xl px-5 py-2.5 min-h-11">Try Again</button>
           </div>
         )}
 
