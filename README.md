@@ -12,9 +12,9 @@
 A hypertrophy-focused training **and** nutrition PWA for serious lifters — block periodization,
 mood-adaptive sessions, on-device AI form coaching, and food tracking, in one calm daily ritual.
 
-[![CI](https://github.com/OWNER/workout-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/workout-tracker/actions/workflows/ci.yml)
-[![Security Scan](https://github.com/OWNER/workout-tracker/actions/workflows/security-scan.yml/badge.svg)](https://github.com/OWNER/workout-tracker/actions/workflows/security-scan.yml)
-[![CodeQL](https://github.com/OWNER/workout-tracker/actions/workflows/codeql.yml/badge.svg)](https://github.com/OWNER/workout-tracker/actions/workflows/codeql.yml)
+[![CI](https://github.com/nextbelt/workout-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/nextbelt/workout-tracker/actions/workflows/ci.yml)
+[![Security Scan](https://github.com/nextbelt/workout-tracker/actions/workflows/security-scan.yml/badge.svg)](https://github.com/nextbelt/workout-tracker/actions/workflows/security-scan.yml)
+[![CodeQL](https://github.com/nextbelt/workout-tracker/actions/workflows/codeql.yml/badge.svg)](https://github.com/nextbelt/workout-tracker/actions/workflows/codeql.yml)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)
 ![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20RLS-3FCF8E?logo=supabase&logoColor=white)
@@ -37,8 +37,30 @@ bodyweight, and can watch your form through your phone camera — all **on-devic
 It's a single-page React app backed by Supabase (Postgres + Auth, with strict Row-Level Security), plus a
 small Express **api-proxy** that keeps third-party API keys off the client.
 
-> 📸 _Add a few screenshots or a short demo GIF here — the home dashboard, an active session, the nutrition
-> tracker, and the Camera Coach overlay make the strongest first impression._
+<div align="center">
+
+### 📸 A look inside
+
+<img src="docs/screenshots/01-landing.png" alt="WorkIn.ai landing screen" width="240"/>
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/02-home.png" alt="Home dashboard" width="200"/><br/><sub><b>Home — your daily ritual</b></sub></td>
+    <td align="center"><img src="docs/screenshots/05-active-session.png" alt="Active session with set-by-set logging" width="200"/><br/><sub><b>Set-by-set logging</b></sub></td>
+    <td align="center"><img src="docs/screenshots/06-nutrition.png" alt="Nutrition tracker" width="200"/><br/><sub><b>Protein-first nutrition</b></sub></td>
+    <td align="center"><img src="docs/screenshots/10-camera-coach.png" alt="AI Camera Coach" width="200"/><br/><sub><b>On-device Camera Coach</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/03-today-prestart.png" alt="Mood-adaptive session with periodization" width="200"/><br/><sub><b>Mood-adaptive &amp; periodized</b></sub></td>
+    <td align="center"><img src="docs/screenshots/08-program.png" alt="Periodized training program" width="200"/><br/><sub><b>Block-periodized program</b></sub></td>
+    <td align="center"><img src="docs/screenshots/07-analytics.png" alt="Volume and progress analytics" width="200"/><br/><sub><b>Volume &amp; progress</b></sub></td>
+    <td align="center"><img src="docs/screenshots/09-exercises.png" alt="Exercise library" width="200"/><br/><sub><b>Exercise library</b></sub></td>
+  </tr>
+</table>
+
+<sub><i>Screens captured from the built-in guest/demo mode — see them live via <b>“Explore the demo — no account”</b> on the login screen.</i></sub>
+
+</div>
 
 ---
 
@@ -175,7 +197,7 @@ exclusively in the api-proxy, which adds a CORS origin allowlist and a 100-req/m
 ### 1 — Clone & install
 
 ```bash
-git clone https://github.com/OWNER/workout-tracker.git
+git clone https://github.com/nextbelt/workout-tracker.git
 cd workout-tracker
 npm install
 ```
