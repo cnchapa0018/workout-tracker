@@ -35,6 +35,9 @@ api-proxy/.env.local
 # Added by code-review-graph
 .code-review-graph/
 
+# Personal reference docs — not part of the app
+/assets/
+
 # AI assistant / agent tooling (local, per-developer — never commit)
 .claude/
 .gemini/
